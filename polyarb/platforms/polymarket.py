@@ -145,20 +145,37 @@ class PolymarketPlatform(PlatformInterface):
         question = data.get("question", "Unknown")
         
         # Parse outcomes and prices
-        outcomes = []
-        prices = {}
-        
-        # Polymarket typically has tokens for Yes/No outcomes
-        tokens = data.get("tokens", [])
-        if tokens:
-            for token in tokens:
-                outcome = token.get("outcome", "")
-                if outcome:
-                    outcomes.append(outcome)
-                    # Price is typically in the last_trade_price or best_bid/best_ask
-                    price = token.get("price", 0.0)
-                    prices[outcome] = float(price) if price else 0.0
-        else:
+        outcomes: list[str] = []
+        prices: Dict[str, float] = {}
+
+        # Gamma returns an "outcomes" array; older payloads may expose "tokens"
+        outcome_entries = data.get("outcomes") or data.get("tokens") or []
+        for entry in outcome_entries:
+            outcome_name = (
+                entry.get("outcome")
+                or entry.get("name")
+                or entry.get("title")
+            )
+
+            if not outcome_name:
+                continue
+
+            price = (
+                entry.get("price")
+                or entry.get("last_price")
+                or entry.get("lastPrice")
+            )
+
+            if price is None:
+                best_bid = entry.get("best_bid") or entry.get("bestBid")
+                best_ask = entry.get("best_ask") or entry.get("bestAsk")
+                if best_bid is not None and best_ask is not None:
+                    price = (float(best_bid) + float(best_ask)) / 2
+
+            outcomes.append(outcome_name)
+            prices[outcome_name] = float(price) if price is not None else 0.0
+
+        if not outcomes:
             # Fallback for different API response formats
             outcomes = ["Yes", "No"]
             prices = {"Yes": 0.5, "No": 0.5}

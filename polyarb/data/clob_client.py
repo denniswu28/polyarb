@@ -77,22 +77,19 @@ class CLOBClient:
         # Prefer py-clob-client if available
         py_kwargs = {"side": side} if side else {}
         orderbook = await self._call_py_clob("get_book", token_id, **py_kwargs)
-        normalized = self._normalize_orderbook(orderbook)
+        normalized = self._normalize_orderbook(orderbook, side=side)
         if normalized is not None:
             return normalized
 
         url = f"{self.base_url}/book"
-        params = {
-            "token_id": token_id
-        }
-
+        params = {"token_id": token_id}
         if side:
             params["side"] = side
-        
+
         try:
             response = await self.client.get(url, params=params)
             response.raise_for_status()
-            return self._normalize_orderbook(response.json())
+            return self._normalize_orderbook(response.json(), side=side)
         except httpx.HTTPError:
             return None
     
@@ -259,8 +256,14 @@ class CLOBClient:
         self._live_price_cache.clear()
 
     @staticmethod
-    def _normalize_orderbook(orderbook: Any) -> Optional[Dict[str, Any]]:
-        """Ensure orderbook payloads share a consistent shape."""
+    def _normalize_orderbook(orderbook: Any, side: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Ensure orderbook payloads share a consistent shape.
+
+        Handles payloads from both the HTTP endpoint ("buys"/"sells") and
+        py-clob-client objects ("bids"/"asks" attributes). When a side-specific
+        query returns a single list of levels, the payload is assigned to the
+        appropriate bids/asks bucket using the provided ``side`` hint.
+        """
         if not orderbook:
             return None
 
@@ -268,11 +271,19 @@ class CLOBClient:
         asks = None
 
         if isinstance(orderbook, dict):
-            bids = orderbook.get("bids")
-            asks = orderbook.get("asks")
+            bids = orderbook.get("bids") or orderbook.get("buys")
+            asks = orderbook.get("asks") or orderbook.get("sells")
+            # Some responses may include a single "orders" list when a side
+            # filter is applied; map it to the correct book side.
+            if bids is None and asks is None and "orders" in orderbook:
+                orders = orderbook.get("orders")
+                if side and side.upper() == "BUY":
+                    bids = orders
+                elif side and side.upper() == "SELL":
+                    asks = orders
         else:
-            bids = getattr(orderbook, "bids", None)
-            asks = getattr(orderbook, "asks", None)
+            bids = getattr(orderbook, "bids", None) or getattr(orderbook, "buys", None)
+            asks = getattr(orderbook, "asks", None) or getattr(orderbook, "sells", None)
 
         if bids is None and asks is None:
             return None
