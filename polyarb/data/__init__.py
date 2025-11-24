@@ -7,7 +7,7 @@ for Polymarket events, markets, outcomes, orderbooks, and trades.
 
 from polyarb.data.models import (
     Event,
-    Market as DBMarket,
+    DBMarket,
     Outcome,
     OrderBookSnapshot,
     Trade,

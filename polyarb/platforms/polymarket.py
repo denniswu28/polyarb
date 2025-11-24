@@ -36,20 +36,61 @@ class PolymarketPlatform(PlatformInterface):
         """Return the platform name."""
         return "Polymarket"
     
-    def get_markets(self, limit: Optional[int] = None) -> List[Market]:
+    def get_markets(
+        self,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        active: Optional[bool] = None,
+        closed: Optional[bool] = None,
+        archived: Optional[bool] = None,
+        slug: Optional[str] = None,
+        tag_id: Optional[str] = None,
+        order: Optional[str] = None,
+        ascending: Optional[bool] = None,
+    ) -> List[Market]:
         """
         Fetch available markets from Polymarket.
-        
+
         Args:
             limit: Optional limit on number of markets to fetch
-            
+            offset: Pagination offset
+            active: Filter by active status
+            closed: Filter by closed status
+            archived: Filter by archived status
+            slug: Filter by slug
+            tag_id: Filter by tag ID
+            order: Sort field
+            ascending: Sort order
+
         Returns:
             List of Market objects
         """
         try:
-            params = {}
-            if limit:
+            params: Dict[str, Any] = {"offset": offset}
+
+            if limit is not None:
                 params["limit"] = limit
+
+            if active is not None:
+                params["active"] = "true" if active else "false"
+
+            if closed is not None:
+                params["closed"] = "true" if closed else "false"
+
+            if archived is not None:
+                params["archived"] = "true" if archived else "false"
+
+            if slug:
+                params["slug"] = slug
+
+            if tag_id:
+                params["tag_id"] = tag_id
+
+            if order:
+                params["order"] = order
+
+            if ascending is not None:
+                params["ascending"] = "true" if ascending else "false"
             
             response = self.session.get(
                 f"{self.BASE_URL}{self.MARKETS_ENDPOINT}",
@@ -104,20 +145,37 @@ class PolymarketPlatform(PlatformInterface):
         question = data.get("question", "Unknown")
         
         # Parse outcomes and prices
-        outcomes = []
-        prices = {}
-        
-        # Polymarket typically has tokens for Yes/No outcomes
-        tokens = data.get("tokens", [])
-        if tokens:
-            for token in tokens:
-                outcome = token.get("outcome", "")
-                if outcome:
-                    outcomes.append(outcome)
-                    # Price is typically in the last_trade_price or best_bid/best_ask
-                    price = token.get("price", 0.0)
-                    prices[outcome] = float(price) if price else 0.0
-        else:
+        outcomes: list[str] = []
+        prices: Dict[str, float] = {}
+
+        # Gamma returns an "outcomes" array; older payloads may expose "tokens"
+        outcome_entries = data.get("outcomes") or data.get("tokens") or []
+        for entry in outcome_entries:
+            outcome_name = (
+                entry.get("outcome")
+                or entry.get("name")
+                or entry.get("title")
+            )
+
+            if not outcome_name:
+                continue
+
+            price = (
+                entry.get("price")
+                or entry.get("last_price")
+                or entry.get("lastPrice")
+            )
+
+            if price is None:
+                best_bid = entry.get("best_bid") or entry.get("bestBid")
+                best_ask = entry.get("best_ask") or entry.get("bestAsk")
+                if best_bid is not None and best_ask is not None:
+                    price = (float(best_bid) + float(best_ask)) / 2
+
+            outcomes.append(outcome_name)
+            prices[outcome_name] = float(price) if price is not None else 0.0
+
+        if not outcomes:
             # Fallback for different API response formats
             outcomes = ["Yes", "No"]
             prices = {"Yes": 0.5, "No": 0.5}
