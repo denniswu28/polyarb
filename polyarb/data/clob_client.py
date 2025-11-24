@@ -82,10 +82,13 @@ class CLOBClient:
             return normalized
 
         url = f"{self.base_url}/book"
-        params = {"token_id": token_id}
+        params = {
+            "token_id": token_id
+        }
+
         if side:
             params["side"] = side
-
+        
         try:
             response = await self.client.get(url, params=params)
             response.raise_for_status()
