@@ -97,13 +97,9 @@ async def main():
     print("Step 2: Fetching market data...")
     
     try:
-        # Fetch events with default filters (liquid, active, 7-49 days)
+        # Fetch events with documented parameters
         filters = GammaClient.get_default_filters()
-        events_data = await gamma_client.fetch_events(
-            active=filters["active"],
-            limit=10,  # Fetch 10 events for demo
-            order_by=filters["order_by"]
-        )
+        events_data = await gamma_client.fetch_events(limit=min(10, filters.get("limit", 10)))
         
         print(f"✓ Fetched {len(events_data)} events from Gamma API")
         

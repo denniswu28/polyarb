@@ -99,7 +99,11 @@ class ArbitrageEngine:
                 
                 # Calculate total price of all outcomes
                 total_price = sum(market.prices.values())
-                
+
+                # Skip malformed markets to avoid division errors
+                if total_price <= 0:
+                    continue
+
                 # If total price < 1, there's an arbitrage opportunity
                 if total_price < self.max_total_price_threshold:
                     profit_percentage = ((1 - total_price) / total_price) * 100
@@ -250,7 +254,7 @@ class ArbitrageEngine:
             prices = []
             for market in markets:
                 price = market.get_price(outcome)
-                if price is not None:
+                if price is not None and price > 0:
                     prices.append((market, price))
             
             if len(prices) >= 2:
@@ -261,6 +265,9 @@ class ArbitrageEngine:
                 
                 # Calculate potential profit
                 price_diff = highest_price - lowest_price
+                if lowest_price <= 0:
+                    continue
+
                 if price_diff > 0.01:  # Minimum 1 cent difference
                     profit_percentage = (price_diff / lowest_price) * 100
                     

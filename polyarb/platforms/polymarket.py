@@ -36,20 +36,61 @@ class PolymarketPlatform(PlatformInterface):
         """Return the platform name."""
         return "Polymarket"
     
-    def get_markets(self, limit: Optional[int] = None) -> List[Market]:
+    def get_markets(
+        self,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        active: Optional[bool] = None,
+        closed: Optional[bool] = None,
+        archived: Optional[bool] = None,
+        slug: Optional[str] = None,
+        tag_id: Optional[str] = None,
+        order: Optional[str] = None,
+        ascending: Optional[bool] = None,
+    ) -> List[Market]:
         """
         Fetch available markets from Polymarket.
-        
+
         Args:
             limit: Optional limit on number of markets to fetch
-            
+            offset: Pagination offset
+            active: Filter by active status
+            closed: Filter by closed status
+            archived: Filter by archived status
+            slug: Filter by slug
+            tag_id: Filter by tag ID
+            order: Sort field
+            ascending: Sort order
+
         Returns:
             List of Market objects
         """
         try:
-            params = {}
-            if limit:
+            params: Dict[str, Any] = {"offset": offset}
+
+            if limit is not None:
                 params["limit"] = limit
+
+            if active is not None:
+                params["active"] = "true" if active else "false"
+
+            if closed is not None:
+                params["closed"] = "true" if closed else "false"
+
+            if archived is not None:
+                params["archived"] = "true" if archived else "false"
+
+            if slug:
+                params["slug"] = slug
+
+            if tag_id:
+                params["tag_id"] = tag_id
+
+            if order:
+                params["order"] = order
+
+            if ascending is not None:
+                params["ascending"] = "true" if ascending else "false"
             
             response = self.session.get(
                 f"{self.BASE_URL}{self.MARKETS_ENDPOINT}",
