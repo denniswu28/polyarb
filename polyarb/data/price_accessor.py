@@ -89,7 +89,8 @@ class PriceAccessor:
     
     async def _get_ask_price(self, token_id: str) -> Optional[float]:
         """Get lowest ask (buy) price."""
-        orderbook = await self.clob_client.fetch_orderbook(token_id, depth=1)
+        # Ask prices live on the SELL side of the book
+        orderbook = await self.clob_client.fetch_orderbook(token_id, side="SELL")
         
         if not orderbook:
             return None
@@ -102,7 +103,8 @@ class PriceAccessor:
     
     async def _get_bid_price(self, token_id: str) -> Optional[float]:
         """Get highest bid (sell) price."""
-        orderbook = await self.clob_client.fetch_orderbook(token_id, depth=1)
+        # Bid prices live on the BUY side of the book
+        orderbook = await self.clob_client.fetch_orderbook(token_id, side="BUY")
         
         if not orderbook:
             return None
@@ -115,7 +117,7 @@ class PriceAccessor:
     
     async def _get_mid_price(self, token_id: str) -> Optional[float]:
         """Get mid-market price (bid + ask) / 2."""
-        orderbook = await self.clob_client.fetch_orderbook(token_id, depth=1)
+        orderbook = await self.clob_client.fetch_orderbook(token_id)
         
         if not orderbook:
             return None

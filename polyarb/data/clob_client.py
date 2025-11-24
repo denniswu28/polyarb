@@ -49,25 +49,27 @@ class CLOBClient:
         await self.client.aclose()
     
     async def fetch_orderbook(
-        self, 
+        self,
         token_id: str,
-        depth: int = 10
+        side: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Fetch orderbook for a token.
         
         Args:
             token_id: Token ID (condition token address)
-            depth: Number of price levels to fetch
+            side: Optional side filter ("BUY" or "SELL")
             
         Returns:
             Orderbook data or None if not available
         """
         url = f"{self.base_url}/book"
         params = {
-            "token_id": token_id,
-            "depth": depth
+            "token_id": token_id
         }
+
+        if side:
+            params["side"] = side
         
         try:
             response = await self.client.get(url, params=params)
@@ -91,10 +93,10 @@ class CLOBClient:
             price, timestamp = self._live_price_cache[token_id]
             if datetime.utcnow() - timestamp < self._cache_ttl:
                 return price
-        
+
         url = f"{self.base_url}/trades"
         params = {
-            "token_id": token_id,
+            "market": token_id,
             "limit": 1
         }
         
@@ -123,7 +125,7 @@ class CLOBClient:
         Returns:
             Dictionary with spread metrics or None
         """
-        orderbook = await self.fetch_orderbook(token_id, depth=1)
+        orderbook = await self.fetch_orderbook(token_id)
         
         if not orderbook:
             return None
@@ -206,21 +208,21 @@ class CLOBClient:
         )
     
     async def fetch_multiple_orderbooks(
-        self, 
+        self,
         token_ids: List[str],
-        depth: int = 10
+        side: Optional[str] = None
     ) -> Dict[str, Optional[Dict[str, Any]]]:
         """
         Fetch orderbooks for multiple tokens concurrently.
         
         Args:
             token_ids: List of token IDs
-            depth: Number of price levels to fetch
+            side: Optional side filter ("BUY" or "SELL")
             
         Returns:
             Dictionary mapping token_id to orderbook data
         """
-        tasks = [self.fetch_orderbook(token_id, depth) for token_id in token_ids]
+        tasks = [self.fetch_orderbook(token_id, side) for token_id in token_ids]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         orderbooks = {}

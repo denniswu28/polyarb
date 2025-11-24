@@ -103,6 +103,24 @@ def test_no_arbitrage_when_prices_sum_to_one():
     assert len(opportunities) == 0
 
 
+def test_intra_platform_skips_non_positive_totals():
+    """Markets with non-positive total prices should be ignored."""
+    market = Market(
+        id="invalid_market",
+        platform="MockPlatform",
+        question="Broken odds?",
+        outcomes=["Yes", "No"],
+        prices={"Yes": 0.0, "No": 0.0},
+    )
+
+    platform = MockPlatform(markets=[market])
+    engine = ArbitrageEngine(platforms=[platform], min_profit_threshold=0.1)
+
+    opportunities = engine.find_opportunities()
+
+    assert opportunities == []
+
+
 def test_opportunity_is_profitable():
     """Test the is_profitable method of ArbitrageOpportunity."""
     opp = ArbitrageOpportunity(
@@ -131,6 +149,39 @@ def test_market_get_price():
     assert market.get_price("Yes") == 0.60
     assert market.get_price("No") == 0.40
     assert market.get_price("Maybe") is None
+
+
+def test_cross_platform_skips_non_positive_prices():
+    """Cross-platform analysis should skip non-positive outcome prices."""
+    market1 = Market(
+        id="market_a",
+        platform="Platform1",
+        question="Will the thing happen?",
+        outcomes=["Yes", "No"],
+        prices={"Yes": 0.0, "No": 0.5},
+    )
+
+    market2 = Market(
+        id="market_b",
+        platform="Platform2",
+        question="Will the thing happen?",
+        outcomes=["Yes", "No"],
+        prices={"Yes": 0.1, "No": 0.5},
+    )
+
+    platform1 = MockPlatform(markets=[market1], name="Platform1")
+    platform2 = MockPlatform(markets=[market2], name="Platform2")
+
+    engine = ArbitrageEngine(platforms=[platform1, platform2], min_profit_threshold=0.1)
+
+    opportunities = engine.find_opportunities()
+
+    cross_platform_opps = [
+        o for o in opportunities
+        if o.opportunity_type == OpportunityType.CROSS_PLATFORM
+    ]
+
+    assert cross_platform_opps == []
 
 
 def test_cross_platform_arbitrage_detection():
