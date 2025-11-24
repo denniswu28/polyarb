@@ -2,7 +2,7 @@
 Price accessor for retrieving token prices by type (ASK, BID, MID, LIVE, ACTUAL).
 """
 
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from datetime import datetime, timedelta
 from decimal import Decimal
 
