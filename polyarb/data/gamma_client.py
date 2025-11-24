@@ -7,7 +7,6 @@ Docs: https://docs.polymarket.com/api-reference/gamma-api
 
 import asyncio
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
 import httpx
 
 from polyarb.data.models import Event, DBMarket, Outcome
@@ -45,49 +44,30 @@ class GammaClient:
     
     async def fetch_events(
         self,
-        active: Optional[bool] = True,
         limit: Optional[int] = 100,
-        offset: int = 0,
-        order_by: str = "volume",
-        ascending: bool = False,
-        start_date_min: Optional[datetime] = None,
-        end_date_min: Optional[datetime] = None,
-        end_date_max: Optional[datetime] = None,
+        slug: Optional[str] = None,
+        tag_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Fetch events from Gamma API.
-        
+
         Args:
-            active: Filter by active status
             limit: Maximum number of events to fetch
-            offset: Pagination offset
-            order_by: Field to order by ('volume', 'end_date', etc.)
-            ascending: Sort order
-            start_date_min: Minimum start date filter
-            end_date_min: Minimum end date filter (e.g., T+7 days)
-            end_date_max: Maximum end date filter (e.g., T+49 days)
+            slug: Filter events by slug
+            tag_id: Filter events by tag ID
             
         Returns:
             List of event dictionaries from API
         """
         params = {
             "limit": limit,
-            "offset": offset,
-            "order": order_by,
-            "ascending": "true" if ascending else "false",
         }
-        
-        if active is not None:
-            params["active"] = "true" if active else "false"
-        
-        if start_date_min:
-            params["start_date_min"] = start_date_min.isoformat()
-        
-        if end_date_min:
-            params["end_date_min"] = end_date_min.isoformat()
-        
-        if end_date_max:
-            params["end_date_max"] = end_date_max.isoformat()
+
+        if slug:
+            params["slug"] = slug
+
+        if tag_id:
+            params["tag_id"] = tag_id
         
         url = f"{self.base_url}/events"
         
@@ -127,15 +107,27 @@ class GammaClient:
         limit: Optional[int] = 100,
         offset: int = 0,
         active: Optional[bool] = True,
+        closed: Optional[bool] = None,
+        archived: Optional[bool] = None,
+        slug: Optional[str] = None,
+        tag_id: Optional[str] = None,
+        order: Optional[str] = None,
+        ascending: Optional[bool] = None,
     ) -> List[Dict[str, Any]]:
         """
         Fetch markets from Gamma API.
-        
+
         Args:
             limit: Maximum number of markets to fetch
             offset: Pagination offset
             active: Filter by active status
-            
+            closed: Filter by closed status
+            archived: Filter by archived status
+            slug: Filter by slug
+            tag_id: Filter by tag ID
+            order: Sort field
+            ascending: Sort order
+
         Returns:
             List of market dictionaries from API
         """
@@ -143,12 +135,30 @@ class GammaClient:
             "limit": limit,
             "offset": offset,
         }
-        
+
         if active is not None:
             params["active"] = "true" if active else "false"
-        
+
+        if closed is not None:
+            params["closed"] = "true" if closed else "false"
+
+        if archived is not None:
+            params["archived"] = "true" if archived else "false"
+
+        if slug:
+            params["slug"] = slug
+
+        if tag_id:
+            params["tag_id"] = tag_id
+
+        if order:
+            params["order"] = order
+
+        if ascending is not None:
+            params["ascending"] = "true" if ascending else "false"
+
         url = f"{self.base_url}/markets"
-        
+
         try:
             response = await self.client.get(url, params=params)
             response.raise_for_status()
@@ -214,16 +224,11 @@ class GammaClient:
     @staticmethod
     def get_default_filters() -> Dict[str, Any]:
         """
-        Get default filters for fetching liquid, active events.
+        Get default filters for fetching events.
         
         Returns:
             Dictionary of filter parameters
         """
-        now = datetime.utcnow()
         return {
-            "active": True,
-            "end_date_min": now + timedelta(days=7),  # At least 7 days until resolution
-            "end_date_max": now + timedelta(days=49),  # At most 49 days
-            "order_by": "volume",
-            "ascending": False,  # Highest volume first
+            "limit": 100
         }
