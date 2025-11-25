@@ -99,27 +99,62 @@ class SingleConditionScanner(BaseScanner):
         if not yes_token_id or not no_token_id:
             return None
         
-        # Fetch prices for YES and NO
-        yes_price = await self.price_accessor.get_price(
-            yes_token_id,
-            price_type,
-            side="buy"
-        )
-        
-        no_price = await self.price_accessor.get_price(
-            no_token_id,
-            price_type,
-            side="buy"
-        )
-        
-        if yes_price is None or no_price is None:
+        price_candidates: list[tuple[PriceType, float, float]] = []
+
+        # Respect requested price type when it explicitly demands bid/ask
+        candidate_types = [PriceType.ASK, PriceType.BID]
+        if price_type in (PriceType.ASK, PriceType.BID):
+            candidate_types = [price_type]
+
+        if PriceType.ASK in candidate_types:
+            # Fetch ASK prices (cost to buy both sides)
+            yes_ask = await self.price_accessor.get_price(
+                yes_token_id,
+                PriceType.ASK,
+                side="buy"
+            )
+
+            no_ask = await self.price_accessor.get_price(
+                no_token_id,
+                PriceType.ASK,
+                side="buy"
+            )
+
+            if yes_ask is not None and no_ask is not None:
+                price_candidates.append((PriceType.ASK, yes_ask, no_ask))
+
+        if PriceType.BID in candidate_types:
+            # Fetch BID prices (potential to sell both sides)
+            yes_bid = await self.price_accessor.get_price(
+                yes_token_id,
+                PriceType.BID,
+                side="sell"
+            )
+
+            no_bid = await self.price_accessor.get_price(
+                no_token_id,
+                PriceType.BID,
+                side="sell"
+            )
+
+            if yes_bid is not None and no_bid is not None:
+                price_candidates.append((PriceType.BID, yes_bid, no_bid))
+
+        # Only consider opportunities that use consistent bid/ask prices
+        valid_candidates: list[tuple[PriceType, float, float, float]] = [
+            (ptype, y_price, n_price, y_price + n_price)
+            for ptype, y_price, n_price in price_candidates
+            if (y_price + n_price) < self.max_total_price_threshold
+        ]
+
+        if not valid_candidates:
             return None
-        
-        # Check for arbitrage
-        total_cost = yes_price + no_price
-        
-        if total_cost >= self.max_total_price_threshold:
-            return None
+
+        # Choose the cheapest viable pairing (ask or bid)
+        selected_type, yes_price, no_price, total_cost = min(
+            valid_candidates,
+            key=lambda candidate: candidate[3]
+        )
         
         # Calculate profit metrics
         metrics = self.calculate_profit_metrics(
@@ -140,7 +175,7 @@ class SingleConditionScanner(BaseScanner):
                 market_id=market.get("id"),
                 market_question=market.get("question", ""),
                 price=yes_price,
-                price_type=price_type.value,
+                price_type=selected_type.value,
             ),
             Leg(
                 token_id=no_token_id,
@@ -149,7 +184,7 @@ class SingleConditionScanner(BaseScanner):
                 market_id=market.get("id"),
                 market_question=market.get("question", ""),
                 price=no_price,
-                price_type=price_type.value,
+                price_type=selected_type.value,
             )
         ]
         
@@ -174,7 +209,10 @@ class SingleConditionScanner(BaseScanner):
             id=str(uuid.uuid4()),
             opportunity_class=OpportunityClass.SINGLE_CONDITION,
             name=f"YES/NO Arbitrage: {market.get('question', '')[:50]}",
-            description=f"Buy YES at {yes_price:.4f} and NO at {no_price:.4f} for guaranteed profit",
+            description=(
+                f"Use {selected_type.value.upper()} prices: YES at {yes_price:.4f} "
+                f"and NO at {no_price:.4f} for guaranteed profit"
+            ),
             legs=legs,
             total_cost=total_cost,
             worst_case_payoff=1.0,
