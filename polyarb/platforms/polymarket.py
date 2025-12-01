@@ -150,27 +150,40 @@ class PolymarketPlatform(PlatformInterface):
 
         # Gamma returns an "outcomes" array; older payloads may expose "tokens"
         outcome_entries = data.get("outcomes") or data.get("tokens") or []
-        for entry in outcome_entries:
-            outcome_name = (
-                entry.get("outcome")
-                or entry.get("name")
-                or entry.get("title")
-            )
+        # Some payloads provide prices in a parallel list rather than per-entry
+        outcome_prices = (
+            data.get("outcomePrices")
+            or data.get("prices")
+            or data.get("outcome_prices")
+        )
+
+        for idx, entry in enumerate(outcome_entries):
+            # Handle entries that are bare strings
+            if isinstance(entry, str):
+                outcome_name = entry
+                price = None
+                if isinstance(outcome_prices, (list, tuple)) and len(outcome_prices) > idx:
+                    price = outcome_prices[idx]
+            else:
+                outcome_name = (
+                    entry.get("outcome")
+                    or entry.get("name")
+                    or entry.get("title")
+                )
+                price = (
+                    entry.get("price")
+                    or entry.get("last_price")
+                    or entry.get("lastPrice")
+                )
+
+                if price is None:
+                    best_bid = entry.get("best_bid") or entry.get("bestBid")
+                    best_ask = entry.get("best_ask") or entry.get("bestAsk")
+                    if best_bid is not None and best_ask is not None:
+                        price = (float(best_bid) + float(best_ask)) / 2
 
             if not outcome_name:
                 continue
-
-            price = (
-                entry.get("price")
-                or entry.get("last_price")
-                or entry.get("lastPrice")
-            )
-
-            if price is None:
-                best_bid = entry.get("best_bid") or entry.get("bestBid")
-                best_ask = entry.get("best_ask") or entry.get("bestAsk")
-                if best_bid is not None and best_ask is not None:
-                    price = (float(best_bid) + float(best_ask)) / 2
 
             outcomes.append(outcome_name)
             prices[outcome_name] = float(price) if price is not None else 0.0
