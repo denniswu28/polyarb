@@ -4,11 +4,15 @@ Polymarket platform integration.
 This module provides integration with the Polymarket prediction market platform.
 """
 
+import logging
 import requests
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from polyarb.platforms.base import PlatformInterface, Market
+
+
+logger = logging.getLogger(__name__)
 
 
 class PolymarketPlatform(PlatformInterface):
@@ -200,6 +204,25 @@ class PolymarketPlatform(PlatformInterface):
             or data.get("outcome_prices")
         )
 
+        if tokens and data.get("outcomes") and outcome_prices:
+            logger.debug(
+                "Market %s provided both tokens and outcome price arrays; "
+                "using tokens for outcome pricing.",
+                market_id,
+            )
+
+        if isinstance(outcome_entries, list) and isinstance(outcome_prices, (list, tuple)):
+            if len(outcome_entries) != len(outcome_prices):
+                raise ValueError(
+                    "Market {mid} outcomes/prices length mismatch "
+                    "(outcomes={o_len}, prices={p_len}); payload keys: {keys}".format(
+                        mid=market_id,
+                        o_len=len(outcome_entries),
+                        p_len=len(outcome_prices),
+                        keys=list(data.keys()),
+                    )
+                )
+
         for idx, entry in enumerate(outcome_entries):
             if isinstance(entry, str):
                 outcome_name = entry
@@ -236,7 +259,11 @@ class PolymarketPlatform(PlatformInterface):
 
             if price is None:
                 raise ValueError(
-                    f"Market {market_id} outcome '{outcome_name}' missing price"
+                    "Market {mid} outcome '{name}' missing price; entry={entry}".format(
+                        mid=market_id,
+                        name=outcome_name,
+                        entry=entry,
+                    )
                 )
 
             try:
