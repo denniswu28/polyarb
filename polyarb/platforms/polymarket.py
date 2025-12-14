@@ -192,8 +192,7 @@ class PolymarketPlatform(PlatformInterface):
         outcomes: list[str] = []
         prices: Dict[str, float] = {}
 
-        tokens = data.get("tokens") or []
-        outcome_entries = tokens or data.get("outcomes")
+        outcome_entries = data.get("outcomes") or data.get("tokens")
         if not outcome_entries:
             raise ValueError(
                 f"Market {market_id} missing outcomes; payload keys: {list(data.keys())}"
