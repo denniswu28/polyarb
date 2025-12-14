@@ -40,7 +40,12 @@ def main():
     print()
     
     # Find opportunities
-    opportunities = engine.find_opportunities()
+    try:
+        opportunities = engine.find_opportunities()
+    except Exception as exc:
+        print("Arbitrage scan failed due to an unexpected error.")
+        print(f"  • Details: {exc}")
+        raise
     
     if not opportunities:
         print("No arbitrage opportunities found at this time.")

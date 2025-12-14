@@ -89,55 +89,51 @@ class ArbitrageEngine:
             List of intra-platform arbitrage opportunities
         """
         opportunities = []
-        
-        try:
-            markets = platform.get_markets(limit=100)
-            
-            for market in markets:
-                if not market.prices or len(market.prices) < 2:
-                    continue
-                
-                # Calculate total price of all outcomes
-                total_price = sum(market.prices.values())
 
-                # Skip malformed markets to avoid division errors
-                if total_price <= 0:
-                    continue
+        markets = platform.get_markets(limit=100)
 
-                # If total price < 1, there's an arbitrage opportunity
-                if total_price < self.max_total_price_threshold:
-                    profit_percentage = ((1 - total_price) / total_price) * 100
-                    
-                    # Calculate optimal positions
-                    strategy = {
-                        "action": "buy_all_outcomes",
-                        "positions": {
-                            outcome: price 
-                            for outcome, price in market.prices.items()
-                        },
-                        "total_cost": total_price,
-                        "guaranteed_return": 1.0,
-                        "net_profit": 1.0 - total_price
-                    }
-                    
-                    opportunity = ArbitrageOpportunity(
-                        opportunity_type=OpportunityType.INTRA_PLATFORM,
-                        market_ids=[market.id],
-                        platforms=[platform.platform_name],
-                        description=(
-                            f"Buy all outcomes in '{market.question}' "
-                            f"for total cost {total_price:.4f}"
-                        ),
-                        profit_percentage=profit_percentage,
-                        strategy=strategy,
-                        confidence=0.95 if total_price < 0.95 else 0.85
-                    )
-                    
-                    opportunities.append(opportunity)
-        
-        except Exception as e:
-            print(f"Error finding intra-platform opportunities on {platform.platform_name}: {e}")
-        
+        for market in markets:
+            if not market.prices or len(market.prices) < 2:
+                continue
+
+            # Calculate total price of all outcomes
+            total_price = sum(market.prices.values())
+
+            # Skip malformed markets to avoid division errors
+            if total_price <= 0:
+                continue
+
+            # If total price < 1, there's an arbitrage opportunity
+            if total_price < self.max_total_price_threshold:
+                profit_percentage = ((1 - total_price) / total_price) * 100
+
+                # Calculate optimal positions
+                strategy = {
+                    "action": "buy_all_outcomes",
+                    "positions": {
+                        outcome: price
+                        for outcome, price in market.prices.items()
+                    },
+                    "total_cost": total_price,
+                    "guaranteed_return": 1.0,
+                    "net_profit": 1.0 - total_price
+                }
+
+                opportunity = ArbitrageOpportunity(
+                    opportunity_type=OpportunityType.INTRA_PLATFORM,
+                    market_ids=[market.id],
+                    platforms=[platform.platform_name],
+                    description=(
+                        f"Buy all outcomes in '{market.question}' "
+                        f"for total cost {total_price:.4f}"
+                    ),
+                    profit_percentage=profit_percentage,
+                    strategy=strategy,
+                    confidence=0.95 if total_price < 0.95 else 0.85
+                )
+
+                opportunities.append(opportunity)
+
         return opportunities
     
     def find_cross_platform_opportunities(self) -> List[ArbitrageOpportunity]:
@@ -150,24 +146,20 @@ class ArbitrageEngine:
             List of cross-platform arbitrage opportunities
         """
         opportunities = []
-        
-        try:
-            # Collect markets from all platforms
-            platform_markets: Dict[str, List[Market]] = {}
-            for platform in self.platforms:
-                platform_markets[platform.platform_name] = platform.get_markets(limit=100)
-            
-            # Find matching markets across platforms
-            matched_markets = self._match_markets_across_platforms(platform_markets)
-            
-            # Analyze each matched market group for arbitrage
-            for market_group in matched_markets:
-                cross_opps = self._analyze_cross_platform_market_group(market_group)
-                opportunities.extend(cross_opps)
-        
-        except Exception as e:
-            print(f"Error finding cross-platform opportunities: {e}")
-        
+
+        # Collect markets from all platforms
+        platform_markets: Dict[str, List[Market]] = {}
+        for platform in self.platforms:
+            platform_markets[platform.platform_name] = platform.get_markets(limit=100)
+
+        # Find matching markets across platforms
+        matched_markets = self._match_markets_across_platforms(platform_markets)
+
+        # Analyze each matched market group for arbitrage
+        for market_group in matched_markets:
+            cross_opps = self._analyze_cross_platform_market_group(market_group)
+            opportunities.extend(cross_opps)
+
         return opportunities
     
     def _match_markets_across_platforms(
