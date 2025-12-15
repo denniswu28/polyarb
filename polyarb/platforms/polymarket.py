@@ -267,6 +267,11 @@ class PolymarketPlatform(PlatformInterface):
                     best_ask = entry.get("best_ask") or entry.get("bestAsk")
                     if best_bid is not None and best_ask is not None:
                         price = (float(best_bid) + float(best_ask)) / 2
+            else:
+                raise TypeError(
+                    f"Market {market_id} has unsupported outcome entry type: "
+                    f"{type(entry).__name__}"
+                )
 
                 if (
                     price is None
