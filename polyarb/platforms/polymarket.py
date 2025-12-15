@@ -192,7 +192,21 @@ class PolymarketPlatform(PlatformInterface):
         outcomes: list[str] = []
         prices: Dict[str, float] = {}
 
-        outcome_entries = data.get("outcomes") or data.get("tokens")
+        tokens_data = data.get("tokens") or []
+        if tokens_data and not isinstance(tokens_data, list):
+            raise TypeError(
+                f"Market {market_id} tokens payload must be a list; got {type(tokens_data).__name__}"
+            )
+
+        outcomes_data = data.get("outcomes") or []
+        if outcomes_data and not isinstance(outcomes_data, list):
+            raise TypeError(
+                "Market {mid} outcomes payload must be a list; got {typ}".format(
+                    mid=market_id, typ=type(outcomes_data).__name__
+                )
+            )
+
+        outcome_entries = tokens_data or outcomes_data
         if not outcome_entries:
             raise ValueError(
                 f"Market {market_id} missing outcomes; payload keys: {list(data.keys())}"
@@ -204,7 +218,14 @@ class PolymarketPlatform(PlatformInterface):
             or data.get("outcome_prices")
         )
 
-        if tokens and data.get("outcomes") and outcome_prices:
+        if outcome_prices is not None and not isinstance(outcome_prices, (list, tuple)):
+            raise TypeError(
+                "Market {mid} prices payload must be a list/tuple when provided; got {typ}".format(
+                    mid=market_id, typ=type(outcome_prices).__name__
+                )
+            )
+
+        if tokens_data and outcomes_data and outcome_prices:
             logger.debug(
                 "Market %s provided both tokens and outcome price arrays; "
                 "using tokens for outcome pricing.",
@@ -246,6 +267,18 @@ class PolymarketPlatform(PlatformInterface):
                     best_ask = entry.get("best_ask") or entry.get("bestAsk")
                     if best_bid is not None and best_ask is not None:
                         price = (float(best_bid) + float(best_ask)) / 2
+            else:
+                raise TypeError(
+                    f"Market {market_id} has unsupported outcome entry type: "
+                    f"{type(entry).__name__}"
+                )
+
+                if (
+                    price is None
+                    and isinstance(outcome_prices, (list, tuple))
+                    and len(outcome_prices) > idx
+                ):
+                    price = outcome_prices[idx]
             else:
                 raise TypeError(
                     f"Market {market_id} has unsupported outcome entry type: "
