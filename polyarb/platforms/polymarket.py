@@ -55,6 +55,7 @@ class PolymarketPlatform(PlatformInterface):
         order: Optional[str] = "liquidity",
         ascending: Optional[bool] = False,
         liquidity_num_min: Optional[float] = None,
+        page_size: int = 50,
     ) -> List[Market]:
         """
         Fetch available markets from Polymarket.
@@ -70,72 +71,101 @@ class PolymarketPlatform(PlatformInterface):
             order: Sort field
             ascending: Sort order
             liquidity_num_min: Minimum liquidity for markets returned
+            page_size: Number of events to request per page when paginating
 
         Returns:
             List of Market objects
         """
         try:
-            params: Dict[str, Any] = {"offset": offset}
-            if limit is not None:
-                params["limit"] = limit
-
-            if slug:
-                params["slug"] = slug
-            if tag_id:
-                params["tag_id"] = tag_id
-            if active is not None:
-                params["active"] = "true" if active else "false"
-            if closed is not None:
-                params["closed"] = "true" if closed else "false"
-            if archived is not None:
-                params["archived"] = "true" if archived else "false"
-
-            response = self.session.get(
-                f"{self.BASE_URL}{self.EVENTS_ENDPOINT}",
-                params=params,
-                timeout=10,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            events_data: List[Dict[str, Any]]
-
-            if isinstance(payload, list):
-                events_data = payload
-            elif isinstance(payload, dict):
-                events_data = (
-                    payload.get("events")
-                    or payload.get("data")
-                    or payload.get("results")
-                    or []
-                )
-                if isinstance(events_data, dict):
-                    events_data = [events_data]
-            else:
-                raise ValueError(
-                    "Unexpected Polymarket response type: "
-                    f"{type(payload).__name__}"
-                )
-
-            if not events_data:
-                raise ValueError(
-                    "Polymarket returned no events; verify API availability "
-                    f"and query params: {params}"
-                )
+            if page_size <= 0:
+                raise ValueError("page_size must be positive")
 
             all_markets: List[Market] = []
-            for event_data in events_data:
-                markets_data = self._coerce_sequence(
-                    event_data.get("markets"),
-                    label="markets",
-                    market_id=event_data.get("id") or "event",
+            current_offset = offset
+            remaining_events = limit
+            seen_any_events = False
+
+            while True:
+                page_limit = page_size
+                if remaining_events is not None:
+                    page_limit = min(page_limit, remaining_events)
+                    if page_limit <= 0:
+                        break
+
+                params: Dict[str, Any] = {"offset": current_offset, "limit": page_limit}
+
+                if slug:
+                    params["slug"] = slug
+                if tag_id:
+                    params["tag_id"] = tag_id
+                if active is not None:
+                    params["active"] = "true" if active else "false"
+                if closed is not None:
+                    params["closed"] = "true" if closed else "false"
+                if archived is not None:
+                    params["archived"] = "true" if archived else "false"
+
+                response = self.session.get(
+                    f"{self.BASE_URL}{self.EVENTS_ENDPOINT}",
+                    params=params,
+                    timeout=10,
                 )
-                for market_data in markets_data:
-                    if market_data["active"]:
-                        market = self._parse_market(market_data)
-                        event_id = event_data.get("id")
-                        if event_id:
-                            market.metadata = {**(market.metadata or {}), "event_id": event_id}
-                        all_markets.append(market)
+                response.raise_for_status()
+                payload = response.json()
+                events_data: List[Dict[str, Any]]
+
+                if isinstance(payload, list):
+                    events_data = payload
+                elif isinstance(payload, dict):
+                    events_data = (
+                        payload.get("events")
+                        or payload.get("data")
+                        or payload.get("results")
+                        or []
+                    )
+                    if isinstance(events_data, dict):
+                        events_data = [events_data]
+                else:
+                    raise ValueError(
+                        "Unexpected Polymarket response type: "
+                        f"{type(payload).__name__}"
+                    )
+
+                if not events_data:
+                    if not seen_any_events:
+                        raise ValueError(
+                            "Polymarket returned no events; verify API availability "
+                            f"and query params: {params}"
+                        )
+                    break
+
+                seen_any_events = True
+
+                for event_data in events_data:
+                    markets_data = self._coerce_sequence(
+                        event_data.get("markets"),
+                        label="markets",
+                        market_id=event_data.get("id") or "event",
+                    )
+                    for market_data in markets_data:
+                        if market_data["active"]:
+                            market = self._parse_market(market_data)
+                            event_id = event_data.get("id")
+                            if event_id:
+                                market.metadata = {
+                                    **(market.metadata or {}),
+                                    "event_id": event_id,
+                                }
+                            all_markets.append(market)
+
+                current_offset += len(events_data)
+                if remaining_events is not None:
+                    remaining_events -= len(events_data)
+                    if remaining_events <= 0:
+                        break
+
+                if len(events_data) < page_limit:
+                    break
 
             if order:
                 all_markets.sort(
