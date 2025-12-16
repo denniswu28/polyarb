@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Optional
 import httpx
 
 from polyarb.data.models import Event, DBMarket, Outcome
+from polyarb.data.gamma_params import build_market_query_params
 
 
 class GammaClient:
@@ -104,15 +105,16 @@ class GammaClient:
     
     async def fetch_markets(
         self,
-        limit: Optional[int] = 100,
+        limit: Optional[int] = 250,
         offset: int = 0,
         active: Optional[bool] = True,
-        closed: Optional[bool] = None,
-        archived: Optional[bool] = None,
+        closed: Optional[bool] = False,
+        archived: Optional[bool] = False,
         slug: Optional[str] = None,
         tag_id: Optional[str] = None,
-        order: Optional[str] = None,
-        ascending: Optional[bool] = None,
+        order: Optional[str] = "liquidity",
+        ascending: Optional[bool] = False,
+        liquidity_num_min: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         """
         Fetch markets from Gamma API.
@@ -125,37 +127,25 @@ class GammaClient:
             archived: Filter by archived status
             slug: Filter by slug
             tag_id: Filter by tag ID
-            order: Sort field
+            order: Sort field (e.g., "liquidity")
             ascending: Sort order
+            liquidity_num_min: Minimum liquidity for markets returned
 
         Returns:
             List of market dictionaries from API
         """
-        params = {
-            "limit": limit,
-            "offset": offset,
-        }
-
-        if active is not None:
-            params["active"] = "true" if active else "false"
-
-        if closed is not None:
-            params["closed"] = "true" if closed else "false"
-
-        if archived is not None:
-            params["archived"] = "true" if archived else "false"
-
-        if slug:
-            params["slug"] = slug
-
-        if tag_id:
-            params["tag_id"] = tag_id
-
-        if order:
-            params["order"] = order
-
-        if ascending is not None:
-            params["ascending"] = "true" if ascending else "false"
+        params = build_market_query_params(
+            limit=limit,
+            offset=offset,
+            active=active,
+            closed=closed,
+            archived=archived,
+            slug=slug,
+            tag_id=tag_id,
+            order=order,
+            ascending=ascending,
+            liquidity_num_min=liquidity_num_min,
+        )
 
         url = f"{self.base_url}/markets"
 
