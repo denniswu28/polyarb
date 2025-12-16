@@ -14,7 +14,6 @@ from polyarb.data.models import (
     PriceType,
 )
 from polyarb.data.database import Database
-from polyarb.data.gamma_client import GammaClient
 from polyarb.data.clob_client import CLOBClient
 from polyarb.data.price_accessor import PriceAccessor
 
@@ -26,7 +25,6 @@ __all__ = [
     "Trade",
     "PriceType",
     "Database",
-    "GammaClient",
     "CLOBClient",
     "PriceAccessor",
 ]
