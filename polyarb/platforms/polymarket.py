@@ -5,10 +5,12 @@ This module provides integration with the Polymarket prediction market platform.
 """
 
 import logging
-import requests
-from typing import List, Optional, Dict, Any
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
+import requests
+
+from polyarb.data.gamma_params import build_market_query_params
 from polyarb.platforms.base import PlatformInterface, Market
 
 
@@ -42,15 +44,16 @@ class PolymarketPlatform(PlatformInterface):
     
     def get_markets(
         self,
-        limit: Optional[int] = None,
+        limit: Optional[int] = 250,
         offset: int = 0,
-        active: Optional[bool] = None,
-        closed: Optional[bool] = None,
-        archived: Optional[bool] = None,
+        active: Optional[bool] = True,
+        closed: Optional[bool] = False,
+        archived: Optional[bool] = False,
         slug: Optional[str] = None,
         tag_id: Optional[str] = None,
-        order: Optional[str] = None,
-        ascending: Optional[bool] = None,
+        order: Optional[str] = "liquidity",
+        ascending: Optional[bool] = False,
+        liquidity_num_min: Optional[float] = None,
     ) -> List[Market]:
         """
         Fetch available markets from Polymarket.
@@ -65,36 +68,24 @@ class PolymarketPlatform(PlatformInterface):
             tag_id: Filter by tag ID
             order: Sort field
             ascending: Sort order
+            liquidity_num_min: Minimum liquidity for markets returned
 
         Returns:
             List of Market objects
         """
         try:
-            params: Dict[str, Any] = {"offset": offset}
-
-            if limit is not None:
-                params["limit"] = limit
-
-            if active is not None:
-                params["active"] = "true" if active else "false"
-
-            if closed is not None:
-                params["closed"] = "true" if closed else "false"
-
-            if archived is not None:
-                params["archived"] = "true" if archived else "false"
-
-            if slug:
-                params["slug"] = slug
-
-            if tag_id:
-                params["tag_id"] = tag_id
-
-            if order:
-                params["order"] = order
-
-            if ascending is not None:
-                params["ascending"] = "true" if ascending else "false"
+            params = build_market_query_params(
+                limit=limit,
+                offset=offset,
+                active=active,
+                closed=closed,
+                archived=archived,
+                slug=slug,
+                tag_id=tag_id,
+                order=order,
+                ascending=ascending,
+                liquidity_num_min=liquidity_num_min,
+            )
             
             response = self.session.get(
                 f"{self.BASE_URL}{self.MARKETS_ENDPOINT}",
@@ -248,8 +239,6 @@ class PolymarketPlatform(PlatformInterface):
             if isinstance(entry, str):
                 outcome_name = entry
                 price = None
-                if isinstance(outcome_prices, (list, tuple)) and len(outcome_prices) > idx:
-                    price = outcome_prices[idx]
             elif isinstance(entry, dict):
                 outcome_name = (
                     entry.get("outcome")
@@ -273,17 +262,12 @@ class PolymarketPlatform(PlatformInterface):
                     f"{type(entry).__name__}"
                 )
 
-                if (
-                    price is None
-                    and isinstance(outcome_prices, (list, tuple))
-                    and len(outcome_prices) > idx
-                ):
-                    price = outcome_prices[idx]
-            else:
-                raise TypeError(
-                    f"Market {market_id} has unsupported outcome entry type: "
-                    f"{type(entry).__name__}"
-                )
+            if (
+                price is None
+                and isinstance(outcome_prices, (list, tuple))
+                and len(outcome_prices) > idx
+            ):
+                price = outcome_prices[idx]
 
             if not outcome_name:
                 raise ValueError(
