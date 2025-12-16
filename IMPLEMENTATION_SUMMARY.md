@@ -12,7 +12,6 @@ Successfully implemented a comprehensive, production-ready automated arbitrage s
 - **5 files, ~950 lines**
 - SQLAlchemy ORM models (Event, Market, Outcome, OrderBookSnapshot, Trade)
 - Database class with connection pooling and session management
-- GammaClient for async event/market fetching with filters and pagination
 - CLOBClient for orderbook/trade data with caching
 - PriceAccessor supporting 5 price types with fallback logic
 - Proper indexing, relationships, and timestamps
@@ -179,7 +178,7 @@ opportunities = engine.find_opportunities()
 
 ### Intermediate (Enhanced Scanning)
 ```python
-from polyarb.data import Database, GammaClient, CLOBClient, PriceAccessor
+from polyarb.data import Database, CLOBClient, PriceAccessor
 from polyarb.scanner import SingleConditionScanner
 
 # Use new data layer + scanners

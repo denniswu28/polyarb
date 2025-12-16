@@ -16,7 +16,6 @@ from datetime import datetime, timedelta
 # Module A: Data, Market State & Storage
 from polyarb.data import (
     Database,
-    GammaClient,
     CLOBClient,
     PriceAccessor,
     PriceType,
@@ -77,7 +76,6 @@ async def main():
     db.initialize()
     
     # Initialize API clients
-    gamma_client = GammaClient()
     clob_client = CLOBClient()
     
     # Create price accessor
@@ -88,7 +86,7 @@ async def main():
         )
     
     print("✓ Database initialized")
-    print("✓ Gamma and CLOB clients ready")
+    print("✓ CLOB client ready")
     print()
     
     # =================================================================
@@ -96,33 +94,13 @@ async def main():
     # =================================================================
     print("Step 2: Fetching market data...")
     
-    try:
-        # Fetch events with documented parameters
-        filters = GammaClient.get_default_filters()
-        events_data = await gamma_client.fetch_events(limit=min(10, filters.get("limit", 10)))
-        
-        print(f"✓ Fetched {len(events_data)} events from Gamma API")
-        
-        # Parse and store in database
-        events, markets, outcomes = gamma_client.parse_events_with_markets(events_data)
-        
-        with db.session() as session:
-            # Add to database
-            for event in events:
-                session.add(event)
-            for market in markets:
-                session.add(market)
-            for outcome in outcomes:
-                session.add(outcome)
-        
-        print(f"✓ Stored {len(events)} events, {len(markets)} markets, {len(outcomes)} outcomes")
-        print()
-        
-    except Exception as e:
-        print(f"Note: Could not fetch live data: {e}")
-        print("Continuing with mock data for demonstration...")
-        events_data = []
-        print()
+    events_data: list[dict] = []
+    events: list = []
+    markets: list = []
+    outcomes: list = []
+
+    print("Note: Gamma API client has been removed; skipping live data fetch.")
+    print()
     
     # =================================================================
     # STEP 3: Create Strategy Templates

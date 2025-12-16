@@ -75,41 +75,11 @@ pip install -r requirements-dev.txt
 ### Basic Usage
 
 ```python
-import asyncio
-from polyarb.data import Database, GammaClient, CLOBClient, PriceAccessor, PriceType
-from polyarb.scanner import SingleConditionScanner
+from polyarb.platforms.polymarket import PolymarketPlatform
 
-async def main():
-    # Initialize data layer
-    db = Database()
-    db.initialize()
-    
-    gamma_client = GammaClient()
-    clob_client = CLOBClient()
-    
-    with db.session() as session:
-        price_accessor = PriceAccessor(clob_client, session)
-    
-    # Fetch markets
-    events_data = await gamma_client.fetch_events(limit=10)
-    events, markets, outcomes = gamma_client.parse_events_with_markets(events_data)
-    
-    # Scan for arbitrage
-    scanner = SingleConditionScanner(
-        price_accessor=price_accessor,
-        min_profit_threshold=0.5
-    )
-    
-    markets_dict = [{"id": m.id, "outcomes": m.outcomes} for m in markets]
-    results = await scanner.scan(markets_dict)
-    
-    print(f"Found {results.get_opportunity_count()} opportunities")
-    
-    # Cleanup
-    await gamma_client.close()
-    await clob_client.close()
-
-asyncio.run(main())
+platform = PolymarketPlatform()
+markets = platform.get_markets(limit=10)
+print(f"Fetched {len(markets)} markets from Polymarket")
 ```
 
 ### Run Complete Demo
