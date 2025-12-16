@@ -23,7 +23,14 @@ PYTHONPATH=/home/runner/work/polyarb/polyarb:$PYTHONPATH python examples/basic_u
 
 Note: Requires internet connection to Polymarket API.
 
-### 3. Run Tests
+### 3. Explore the Enhanced System
+```bash
+PYTHONPATH=/home/runner/work/polyarb/polyarb:$PYTHONPATH python examples/enhanced_system_demo.py
+```
+
+This runs the comprehensive demo that wires together the enhanced architecture modules (data, strategy templates, embeddings, scanners, execution, and reporting). See `ENHANCED_SYSTEM.md` for a module-by-module overview.
+
+### 4. Run Tests
 ```bash
 PYTHONPATH=/home/runner/work/polyarb/polyarb:$PYTHONPATH python -m pytest tests/ -v
 ```
