@@ -4,13 +4,13 @@ Polymarket platform integration.
 This module provides integration with the Polymarket prediction market platform.
 """
 
+import ast
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import requests
 
-from polyarb.data.gamma_params import build_market_query_params
 from polyarb.platforms.base import PlatformInterface, Market
 
 
@@ -22,6 +22,7 @@ class PolymarketPlatform(PlatformInterface):
     
     # Polymarket public API endpoints
     BASE_URL = "https://gamma-api.polymarket.com"
+    EVENTS_ENDPOINT = "/events"
     MARKETS_ENDPOINT = "/markets"
     
     def __init__(self, api_key: Optional[str] = None, **kwargs):
@@ -44,7 +45,7 @@ class PolymarketPlatform(PlatformInterface):
     
     def get_markets(
         self,
-        limit: Optional[int] = 250,
+        limit: Optional[int] = 100,
         offset: int = 0,
         active: Optional[bool] = True,
         closed: Optional[bool] = False,
@@ -74,49 +75,81 @@ class PolymarketPlatform(PlatformInterface):
             List of Market objects
         """
         try:
-            params = build_market_query_params(
-                limit=limit,
-                offset=offset,
-                active=active,
-                closed=closed,
-                archived=archived,
-                slug=slug,
-                tag_id=tag_id,
-                order=order,
-                ascending=ascending,
-                liquidity_num_min=liquidity_num_min,
-            )
-            
+            params: Dict[str, Any] = {"offset": offset}
+            if limit is not None:
+                params["limit"] = limit
+
+            if slug:
+                params["slug"] = slug
+            if tag_id:
+                params["tag_id"] = tag_id
+            if active is not None:
+                params["active"] = "true" if active else "false"
+            if closed is not None:
+                params["closed"] = "true" if closed else "false"
+            if archived is not None:
+                params["archived"] = "true" if archived else "false"
+
             response = self.session.get(
-                f"{self.BASE_URL}{self.MARKETS_ENDPOINT}",
+                f"{self.BASE_URL}{self.EVENTS_ENDPOINT}",
                 params=params,
-                timeout=10
+                timeout=10,
             )
             response.raise_for_status()
-
             payload = response.json()
-            if isinstance(payload, dict):
-                markets_data = payload.get("markets")
-                if markets_data is None:
-                    raise ValueError(
-                        "Polymarket response missing 'markets' key; "
-                        f"available keys: {list(payload.keys())}"
-                    )
-            elif isinstance(payload, list):
-                markets_data = payload
+            events_data: List[Dict[str, Any]]
+
+            if isinstance(payload, list):
+                events_data = payload
+            elif isinstance(payload, dict):
+                events_data = (
+                    payload.get("events")
+                    or payload.get("data")
+                    or payload.get("results")
+                    or []
+                )
+                if isinstance(events_data, dict):
+                    events_data = [events_data]
             else:
                 raise ValueError(
                     "Unexpected Polymarket response type: "
                     f"{type(payload).__name__}"
                 )
 
-            if not markets_data:
+            if not events_data:
                 raise ValueError(
-                    "Polymarket returned no markets; verify API availability "
+                    "Polymarket returned no events; verify API availability "
                     f"and query params: {params}"
                 )
 
-            return [self._parse_market(data) for data in markets_data]
+            all_markets: List[Market] = []
+            for event_data in events_data:
+                markets_data = self._coerce_sequence(
+                    event_data.get("markets"),
+                    label="markets",
+                    market_id=event_data.get("id") or "event",
+                )
+                for market_data in markets_data:
+                    market = self._parse_market(market_data)
+                    event_id = event_data.get("id")
+                    if event_id:
+                        market.metadata = {**(market.metadata or {}), "event_id": event_id}
+                    all_markets.append(market)
+
+            if order:
+                all_markets.sort(
+                    key=lambda m: m.prices.get("Yes", 0)
+                    if order == "price"
+                    else m.volume or 0,
+                    reverse=not ascending,
+                )
+
+            if liquidity_num_min is not None:
+                all_markets = [
+                    m for m in all_markets if (m.volume or 0) >= liquidity_num_min
+                ]
+
+            return all_markets
 
         except requests.RequestException as e:
             raise RuntimeError(
@@ -183,19 +216,13 @@ class PolymarketPlatform(PlatformInterface):
         outcomes: list[str] = []
         prices: Dict[str, float] = {}
 
-        tokens_data = data.get("tokens") or []
-        if tokens_data and not isinstance(tokens_data, list):
-            raise TypeError(
-                f"Market {market_id} tokens payload must be a list; got {type(tokens_data).__name__}"
-            )
+        tokens_data = self._coerce_sequence(
+            data.get("tokens"), label="tokens", market_id=market_id
+        )
 
-        outcomes_data = data.get("outcomes") or []
-        if outcomes_data and not isinstance(outcomes_data, list):
-            raise TypeError(
-                "Market {mid} outcomes payload must be a list; got {typ}".format(
-                    mid=market_id, typ=type(outcomes_data).__name__
-                )
-            )
+        outcomes_data = self._coerce_sequence(
+            data.get("outcomes"), label="outcomes", market_id=market_id
+        )
 
         outcome_entries = tokens_data or outcomes_data
         if not outcome_entries:
@@ -203,18 +230,14 @@ class PolymarketPlatform(PlatformInterface):
                 f"Market {market_id} missing outcomes; payload keys: {list(data.keys())}"
             )
 
-        outcome_prices = (
+        outcome_prices_raw = (
             data.get("outcomePrices")
             or data.get("prices")
             or data.get("outcome_prices")
         )
-
-        if outcome_prices is not None and not isinstance(outcome_prices, (list, tuple)):
-            raise TypeError(
-                "Market {mid} prices payload must be a list/tuple when provided; got {typ}".format(
-                    mid=market_id, typ=type(outcome_prices).__name__
-                )
-            )
+        outcome_prices = self._coerce_prices_sequence(
+            outcome_prices_raw, market_id=market_id
+        )
 
         if tokens_data and outcomes_data and outcome_prices:
             logger.debug(
@@ -326,3 +349,44 @@ class PolymarketPlatform(PlatformInterface):
             end_date=end_date,
             metadata=data
         )
+
+    def _coerce_sequence(
+        self,
+        value: Any,
+        *,
+        label: str,
+        market_id: Any,
+    ) -> List[Any]:
+        """Convert list-like values (or list strings) into concrete lists."""
+
+        if value is None:
+            return []
+
+        if isinstance(value, str):
+            try:
+                value = ast.literal_eval(value)
+            except (ValueError, SyntaxError) as exc:
+                raise ValueError(
+                    f"Market {market_id} {label} payload could not be parsed as list: {value}"
+                ) from exc
+
+        if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray, str)):
+            return list(value)
+
+        raise TypeError(
+            f"Market {market_id} {label} payload must be list-like; got {type(value).__name__}"
+        )
+
+    def _coerce_prices_sequence(
+        self,
+        value: Any,
+        *,
+        market_id: Any,
+    ) -> Optional[List[Any]]:
+        """Coerce price arrays (or stringified arrays) into lists."""
+
+        if value is None:
+            return None
+
+        prices = self._coerce_sequence(value, label="prices", market_id=market_id)
+        return prices
