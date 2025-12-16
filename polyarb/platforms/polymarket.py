@@ -45,7 +45,7 @@ class PolymarketPlatform(PlatformInterface):
     
     def get_markets(
         self,
-        limit: Optional[int] = 100,
+        limit: Optional[int] = 100000,
         offset: int = 0,
         active: Optional[bool] = True,
         closed: Optional[bool] = False,
@@ -130,11 +130,12 @@ class PolymarketPlatform(PlatformInterface):
                     market_id=event_data.get("id") or "event",
                 )
                 for market_data in markets_data:
-                    market = self._parse_market(market_data)
-                    event_id = event_data.get("id")
-                    if event_id:
-                        market.metadata = {**(market.metadata or {}), "event_id": event_id}
-                    all_markets.append(market)
+                    if market_data["active"]:
+                        market = self._parse_market(market_data)
+                        event_id = event_data.get("id")
+                        if event_id:
+                            market.metadata = {**(market.metadata or {}), "event_id": event_id}
+                        all_markets.append(market)
 
             if order:
                 all_markets.sort(
@@ -208,6 +209,7 @@ class PolymarketPlatform(PlatformInterface):
             raise ValueError("Polymarket market payload missing identifier")
 
         question = data.get("question")
+        print(question)
         if not question:
             raise ValueError(
                 f"Market {market_id} missing required question text"
@@ -291,6 +293,9 @@ class PolymarketPlatform(PlatformInterface):
                 and len(outcome_prices) > idx
             ):
                 price = outcome_prices[idx]
+            else:
+                print(outcome_prices_raw)
+                raise ValueError("Missing price")
 
             if not outcome_name:
                 raise ValueError(
