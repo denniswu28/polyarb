@@ -12,6 +12,7 @@ This module provides comprehensive arbitrage scanning capabilities including:
 from polyarb.scanner.base_scanner import BaseScanner, ScanResult
 from polyarb.scanner.single_condition_scanner import SingleConditionScanner
 from polyarb.scanner.negrisk_scanner import NegRiskScanner
+from polyarb.scanner.single_event_multi_market_scanner import SingleEventMultiMarketScanner
 from polyarb.scanner.strategy_scanner import StrategyScanner
 from polyarb.scanner.enhanced_opportunity import EnhancedOpportunity, OpportunityClass
 
@@ -20,6 +21,7 @@ __all__ = [
     "ScanResult",
     "SingleConditionScanner",
     "NegRiskScanner",
+    "SingleEventMultiMarketScanner",
     "StrategyScanner",
     "EnhancedOpportunity",
     "OpportunityClass",
