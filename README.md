@@ -2,6 +2,19 @@
 
 An intelligent arbitrage detection system for prediction markets including Polymarket, PredictIt, and Kalshi. Polyarb identifies both intra-platform and cross-platform arbitrage opportunities to maximize profit potential.
 
+## Enhanced System Architecture
+
+Beyond the core engine, the enhanced Polymarket system is organized into six modules that work together:
+
+1. **Data, Market State & Storage** – SQLAlchemy models, order book accessors, and price abstractions for ASK/BID/MID/LIVE/ACTUAL.
+2. **Strategy Template Library** – Reusable strategy builders (e.g., `all_no`, `balanced`) and a registry for filtering and discovery.
+3. **Embedding & Dependency Detection** – Event embeddings, clustering, and LLM-based dependency detection for combinatorial arbitrage.
+4. **Enhanced Arbitrage Scanner** – Single-condition, NegRisk, and strategy-aware scanners with liquidity-aware profitability scoring.
+5. **Execution & Risk Management** – Basket execution, slippage tracking, and configurable risk limits across strategies and markets.
+6. **Evaluation, Backtesting & Reporting** – Performance tracking, historical replay utilities, and CSV/HTML report generation.
+
+See `ENHANCED_SYSTEM.md` for a full breakdown and walkthrough.
+
 ## Features
 
 - 🎯 **Intra-Platform Arbitrage**: Detect opportunities within a single platform where the sum of outcome prices is less than 1
