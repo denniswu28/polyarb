@@ -23,14 +23,21 @@ PYTHONPATH=/home/runner/work/polyarb/polyarb:$PYTHONPATH python examples/basic_u
 
 Note: Requires internet connection to Polymarket API.
 
-### 3. Explore the Enhanced System
+### 3. Run the Single-Event Multi-Market Scanner (live data)
+```bash
+PYTHONPATH=/home/runner/work/polyarb/polyarb:$PYTHONPATH python examples/single_event_multi_market_scan.py --limit 200 --min-profit 0.5
+```
+
+This command pulls active events from Polymarket's Gamma API and scans for "other"-covered events where buying YES on every market costs less than $1.
+
+### 4. Explore the Enhanced System
 ```bash
 PYTHONPATH=/home/runner/work/polyarb/polyarb:$PYTHONPATH python examples/enhanced_system_demo.py
 ```
 
 This runs the comprehensive demo that wires together the enhanced architecture modules (data, strategy templates, embeddings, scanners, execution, and reporting). See `ENHANCED_SYSTEM.md` for a module-by-module overview.
 
-### 4. Run Tests
+### 5. Run Tests
 ```bash
 PYTHONPATH=/home/runner/work/polyarb/polyarb:$PYTHONPATH python -m pytest tests/ -v
 ```

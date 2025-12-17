@@ -14,6 +14,7 @@ class OpportunityClass(str, Enum):
     SINGLE_CONDITION = "single_condition"  # YES+NO Dutch-book
     NEGRISK_REBALANCING = "negrisk_rebalancing"  # Within-market rebalancing
     COMBINATORIAL = "combinatorial"  # Inter-market arbitrage
+    SINGLE_EVENT_MULTI_MARKET = "single_event_multi_market"  # Multi-market coverage within an event
     TEMPLATE_BASED = "template_based"  # Strategy template (all_no, balanced)
 
 
