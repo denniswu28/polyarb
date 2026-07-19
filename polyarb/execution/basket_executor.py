@@ -167,8 +167,8 @@ class BasketExecutor:
             target_size,
         ):
             raise OpportunityNotApprovedError(
-                "Simulated execution requires an active RiskManager-issued "
-                "approval reservation for this opportunity and size."
+                "Simulated execution requires an active, unchanged RiskManager-issued "
+                "approval reservation for this opportunity and exact size."
             )
         if target_size <= 0:
             raise ValueError("target_size must be positive")

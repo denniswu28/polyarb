@@ -1,11 +1,17 @@
 """Offline tests for price orientation and scanner arithmetic."""
 
+from copy import deepcopy
+
 import pytest
 
 from polyarb.data.models import PriceType
 from polyarb.data.price_accessor import PriceAccessor
 from polyarb.scanner.base_scanner import BaseScanner
+from polyarb.scanner.negrisk_scanner import NegRiskScanner
 from polyarb.scanner.single_condition_scanner import SingleConditionScanner
+from polyarb.scanner.single_event_multi_market_scanner import (
+    SingleEventMultiMarketScanner,
+)
 
 
 class UnsortedCLOB:
@@ -122,3 +128,72 @@ async def test_yes_no_outcome_orientation_and_ask_liquidity():
     ]
     assert all(leg.price_type == PriceType.ASK.value for leg in opportunity.legs)
     assert opportunity.max_size == pytest.approx(25.0)
+
+
+def make_coverage_group():
+    return [
+        {
+            "id": "market-a",
+            "event_id": "event-1",
+            "question": "Will option A occur?",
+            "outcomes": [{"label": "Yes", "yes_token_id": "token-a"}],
+            "is_neg_risk": True,
+            "neg_risk_id": "neg-risk-1",
+        },
+        {
+            "id": "market-b",
+            "event_id": "event-1",
+            "question": "Will option B occur?",
+            "outcomes": [{"label": "Yes", "yes_token_id": "token-b"}],
+            "is_neg_risk": True,
+            "neg_risk_id": "neg-risk-1",
+        },
+        {
+            "id": "market-other",
+            "event_id": "event-1",
+            "question": "Will another option occur?",
+            "outcomes": [{"label": "Yes", "yes_token_id": "token-other"}],
+            "is_neg_risk": True,
+            "neg_risk_id": "neg-risk-1",
+        },
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "scanner_class",
+    [SingleEventMultiMarketScanner, NegRiskScanner],
+)
+@pytest.mark.parametrize("missing_input", ["outcome", "token", "ask"])
+async def test_coverage_scanners_reject_entire_group_when_a_required_leg_is_missing(
+    scanner_class,
+    missing_input,
+):
+    complete_prices = {
+        "token-a": 0.20,
+        "token-b": 0.20,
+        "token-other": 0.20,
+    }
+    scanner = scanner_class(
+        price_accessor=StaticPriceAccessor(dict(complete_prices)),
+        min_profit_threshold=0.1,
+        max_total_price_threshold=0.98,
+        price_type=PriceType.ASK,
+    )
+
+    complete = await scanner.scan(make_coverage_group())
+    assert complete.get_opportunity_count() == 1
+
+    incomplete_markets = deepcopy(make_coverage_group())
+    incomplete_prices = dict(complete_prices)
+    if missing_input == "outcome":
+        incomplete_markets[1]["outcomes"] = []
+    elif missing_input == "token":
+        incomplete_markets[1]["outcomes"][0].pop("yes_token_id")
+    else:
+        incomplete_prices.pop("token-b")
+
+    scanner.price_accessor = StaticPriceAccessor(incomplete_prices)
+    incomplete = await scanner.scan(incomplete_markets)
+
+    assert incomplete.get_opportunity_count() == 0

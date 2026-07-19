@@ -118,7 +118,8 @@ class SingleEventMultiMarketScanner(BaseScanner):
         Evaluate a group of markets within a single event.
 
         Requires the event to contain an "other" style market to ensure
-        coverage of the outcome space.
+        coverage of the outcome space. Missing required outcomes, token IDs, or
+        executable asks invalidate the entire event group.
         """
         if len(markets) < 2:
             return None
@@ -133,11 +134,15 @@ class SingleEventMultiMarketScanner(BaseScanner):
         for market in markets:
             primary_outcome = self._select_primary_outcome(market)
             if not primary_outcome:
-                continue
+                return None
 
             yes_token_id = primary_outcome.get("yes_token_id")
             if not yes_token_id:
-                continue
+                return None
+
+            market_id = market.get("id")
+            if not market_id:
+                return None
 
             yes_price = await self.price_accessor.get_price(
                 yes_token_id,
@@ -145,13 +150,19 @@ class SingleEventMultiMarketScanner(BaseScanner):
                 side="buy",
             )
             if yes_price is None:
-                continue
+                return None
+            try:
+                yes_price = float(yes_price)
+            except (TypeError, ValueError):
+                return None
+            if not 0 < yes_price <= 1:
+                return None
 
             leg = Leg(
                 token_id=yes_token_id,
                 side="YES",
                 outcome_label=primary_outcome.get("label", ""),
-                market_id=market.get("id"),
+                market_id=market_id,
                 market_question=market.get("question", ""),
                 price=yes_price,
                 price_type=price_type.value,
@@ -166,9 +177,9 @@ class SingleEventMultiMarketScanner(BaseScanner):
 
             legs.append(leg)
             total_cost += yes_price
-            market_ids.append(market.get("id"))
+            market_ids.append(market_id)
 
-        if len(legs) < 2:
+        if len(legs) < 2 or len(legs) != len(markets):
             return None
 
         if total_cost >= self.max_total_price_threshold:
@@ -227,7 +238,9 @@ class SingleEventMultiMarketScanner(BaseScanner):
     def _select_primary_outcome(self, market: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Select the outcome representing the YES side for this market."""
         outcomes = market.get("outcomes", []) or []
-        if not outcomes:
+        if not isinstance(outcomes, list) or not outcomes:
+            return None
+        if any(not isinstance(outcome, dict) for outcome in outcomes):
             return None
 
         yes_labels = {"yes", "true"}
@@ -246,6 +259,8 @@ class SingleEventMultiMarketScanner(BaseScanner):
             text_parts.append(question)
 
         for outcome in market.get("outcomes", []) or []:
+            if not isinstance(outcome, dict):
+                continue
             label = outcome.get("label")
             if label:
                 text_parts.append(label)

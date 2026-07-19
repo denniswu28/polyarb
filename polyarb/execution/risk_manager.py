@@ -1,10 +1,57 @@
 """Risk approval limits with aggregate exposure reservations."""
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from polyarb.core.lifecycle import LifecycleState
 from polyarb.scanner.enhanced_opportunity import EnhancedOpportunity, RiskLevel
+
+
+@dataclass(frozen=True)
+class _LegApprovalFingerprint:
+    """Immutable copy of every modeled leg field used by execution or risk."""
+
+    token_id: str
+    side: str
+    outcome_label: str
+    market_id: str
+    market_question: str
+    price: float
+    price_type: str
+    size: Optional[float]
+    spread_bps: Optional[float]
+    depth: Optional[float]
+
+
+@dataclass(frozen=True)
+class _OpportunityApprovalFingerprint:
+    """Immutable approval-time copy of execution-relevant opportunity state."""
+
+    opportunity_id: str
+    opportunity_class: str
+    approved_size: float
+    strategy_id: Optional[str]
+    name: str
+    description: str
+    legs: Tuple[_LegApprovalFingerprint, ...]
+    total_cost: float
+    worst_case_payoff: float
+    best_case_payoff: float
+    expected_profit: float
+    profit_percentage: float
+    adjusted_cost: Optional[float]
+    adjusted_profit: Optional[float]
+    adjusted_profit_percentage: Optional[float]
+    risk_level: str
+    rule_risk_notes: Tuple[str, ...]
+    max_size: Optional[float]
+    liquidity_score: Optional[float]
+    market_ids: Tuple[str, ...]
+    event_ids: Tuple[str, ...]
+    tags: Tuple[str, ...]
+    topic: Optional[str]
+    is_pure_arbitrage: bool
+    expires_at: Optional[str]
 
 
 @dataclass
@@ -51,6 +98,68 @@ class RiskManager:
         self.total_rule_risk_exposure = 0.0
 
     @staticmethod
+    def _optional_float(value: Optional[float]) -> Optional[float]:
+        return None if value is None else float(value)
+
+    @classmethod
+    def _approval_fingerprint(
+        cls,
+        opportunity: EnhancedOpportunity,
+        approved_size: float,
+    ) -> _OpportunityApprovalFingerprint:
+        """Copy mutable opportunity state into an immutable approval fingerprint."""
+        legs = tuple(
+            _LegApprovalFingerprint(
+                token_id=str(leg.token_id),
+                side=str(leg.side),
+                outcome_label=str(leg.outcome_label),
+                market_id=str(leg.market_id),
+                market_question=str(leg.market_question),
+                price=float(leg.price),
+                price_type=str(leg.price_type),
+                size=cls._optional_float(leg.size),
+                spread_bps=cls._optional_float(leg.spread_bps),
+                depth=cls._optional_float(leg.depth),
+            )
+            for leg in opportunity.legs
+        )
+        return _OpportunityApprovalFingerprint(
+            opportunity_id=str(opportunity.id),
+            opportunity_class=opportunity.opportunity_class.value,
+            approved_size=float(approved_size),
+            strategy_id=(
+                None if opportunity.strategy_id is None else str(opportunity.strategy_id)
+            ),
+            name=str(opportunity.name),
+            description=str(opportunity.description),
+            legs=legs,
+            total_cost=float(opportunity.total_cost),
+            worst_case_payoff=float(opportunity.worst_case_payoff),
+            best_case_payoff=float(opportunity.best_case_payoff),
+            expected_profit=float(opportunity.expected_profit),
+            profit_percentage=float(opportunity.profit_percentage),
+            adjusted_cost=cls._optional_float(opportunity.adjusted_cost),
+            adjusted_profit=cls._optional_float(opportunity.adjusted_profit),
+            adjusted_profit_percentage=cls._optional_float(
+                opportunity.adjusted_profit_percentage
+            ),
+            risk_level=opportunity.risk_level.value,
+            rule_risk_notes=tuple(str(note) for note in opportunity.rule_risk_notes),
+            max_size=cls._optional_float(opportunity.max_size),
+            liquidity_score=cls._optional_float(opportunity.liquidity_score),
+            market_ids=tuple(str(market_id) for market_id in opportunity.market_ids),
+            event_ids=tuple(str(event_id) for event_id in opportunity.event_ids),
+            tags=tuple(str(tag) for tag in opportunity.tags),
+            topic=None if opportunity.topic is None else str(opportunity.topic),
+            is_pure_arbitrage=bool(opportunity.is_pure_arbitrage),
+            expires_at=(
+                opportunity.expires_at.isoformat()
+                if opportunity.expires_at is not None
+                else None
+            ),
+        )
+
+    @staticmethod
     def _proposal(opportunity: EnhancedOpportunity, size: float) -> Dict[str, Any]:
         """Build an exposure reservation whose market allocations sum to notional."""
         total_notional = max(0.0, opportunity.total_cost * size)
@@ -81,6 +190,10 @@ class RiskManager:
         return {
             "opportunity_id": opportunity.id,
             "opportunity": opportunity,
+            "approval_fingerprint": RiskManager._approval_fingerprint(
+                opportunity,
+                size,
+            ),
             "size": size,
             "total_notional": total_notional,
             "position_count": len(opportunity.legs),
@@ -236,14 +349,24 @@ class RiskManager:
         opportunity: EnhancedOpportunity,
         requested_size: float,
     ) -> bool:
-        """Return whether this manager has an active reservation for this object."""
+        """Require the exact object, size, and immutable approval-time fingerprint."""
         proposal = self.approvals.get(opportunity.id)
+        if (
+            proposal is None
+            or proposal.get("opportunity") is not opportunity
+            or opportunity.lifecycle_state != LifecycleState.APPROVED
+            or requested_size <= 0
+        ):
+            return False
+        try:
+            current_fingerprint = self._approval_fingerprint(
+                opportunity,
+                requested_size,
+            )
+        except (AttributeError, TypeError, ValueError):
+            return False
         return bool(
-            proposal is not None
-            and proposal.get("opportunity") is opportunity
-            and opportunity.lifecycle_state == LifecycleState.APPROVED
-            and requested_size > 0
-            and requested_size <= proposal["size"] + 1e-12
+            current_fingerprint == proposal.get("approval_fingerprint")
         )
 
     def release_approval(self, opportunity_id: str) -> None:
@@ -263,10 +386,10 @@ class RiskManager:
         proposal = self.approvals.get(opportunity.id)
         if proposal is None:
             raise ValueError("A matching risk approval is required before adding positions")
-        if proposal.get("opportunity") is not opportunity:
-            raise ValueError("The risk approval belongs to a different opportunity object")
-        if abs(proposal["size"] - size) > 1e-12:
-            raise ValueError("Position size must match the approved reservation")
+        if not self.has_active_approval(opportunity, size):
+            raise ValueError(
+                "Opportunity state and size must match the immutable risk approval"
+            )
         if any(leg.token_id in self.positions for leg in opportunity.legs):
             raise ValueError("A position already exists for one or more opportunity legs")
 

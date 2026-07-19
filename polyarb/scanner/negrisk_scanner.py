@@ -22,7 +22,8 @@ class NegRiskScanner(BaseScanner):
     
     The calculation assumes the supplied outcomes are mutually exclusive and
     exhaustive under compatible rules. An ASK basket below its modeled payoff
-    is a candidate edge, not a guaranteed result.
+    is a candidate edge, not a guaranteed result. Every listed market must have
+    its required outcome, token ID, and executable ask.
     """
     
     async def scan(
@@ -118,8 +119,12 @@ class NegRiskScanner(BaseScanner):
         for market in markets:
             outcomes = market.get("outcomes", [])
             
-            if not outcomes:
-                continue
+            if (
+                not isinstance(outcomes, list)
+                or not outcomes
+                or not isinstance(outcomes[0], dict)
+            ):
+                return None
             
             # For NegRisk, we buy YES on each outcome
             # (each outcome is mutually exclusive, exactly one will resolve TRUE)
@@ -127,7 +132,11 @@ class NegRiskScanner(BaseScanner):
             yes_token_id = outcome.get("yes_token_id")
             
             if not yes_token_id:
-                continue
+                return None
+
+            market_id = market.get("id")
+            if not market_id:
+                return None
             
             # Get YES price
             yes_price = await self.price_accessor.get_price(
@@ -137,14 +146,20 @@ class NegRiskScanner(BaseScanner):
             )
             
             if yes_price is None:
-                continue
+                return None
+            try:
+                yes_price = float(yes_price)
+            except (TypeError, ValueError):
+                return None
+            if not 0 < yes_price <= 1:
+                return None
             
             # Create leg
             leg = Leg(
                 token_id=yes_token_id,
                 side="YES",
                 outcome_label=outcome.get("label", ""),
-                market_id=market.get("id"),
+                market_id=market_id,
                 market_question=market.get("question", ""),
                 price=yes_price,
                 price_type=price_type.value,
@@ -159,7 +174,7 @@ class NegRiskScanner(BaseScanner):
             legs.append(leg)
             total_cost += yes_price
         
-        if len(legs) < 2:
+        if len(legs) < 2 or len(legs) != len(markets):
             return None
         
         # Check for arbitrage (sum of YES prices < 1)

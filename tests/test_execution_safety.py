@@ -18,6 +18,7 @@ from polyarb.scanner.enhanced_opportunity import (
     EnhancedOpportunity,
     Leg,
     OpportunityClass,
+    RiskLevel,
 )
 
 
@@ -168,6 +169,72 @@ async def test_released_approval_cannot_be_executed():
     assert manager.get_exposure_summary()["approved_notional"] == 0.0
     with pytest.raises(OpportunityNotApprovedError, match="RiskManager-issued"):
         await executor.execute_opportunity(opportunity)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mutation", "target_size"),
+    [
+        pytest.param(
+            lambda opportunity: opportunity.legs.append(
+                Leg(
+                    "third",
+                    "YES",
+                    "Third",
+                    "market-3",
+                    "Third synthetic leg?",
+                    0.10,
+                    "ask",
+                    depth=10,
+                )
+            ),
+            1.0,
+            id="legs",
+        ),
+        pytest.param(
+            lambda opportunity: setattr(opportunity.legs[0], "price", 50.0),
+            1.0,
+            id="prices",
+        ),
+        pytest.param(
+            lambda opportunity: setattr(opportunity, "total_cost", 100.0),
+            1.0,
+            id="cost",
+        ),
+        pytest.param(
+            lambda opportunity: opportunity.market_ids.append("market-3"),
+            1.0,
+            id="markets",
+        ),
+        pytest.param(
+            lambda opportunity: setattr(opportunity, "strategy_id", "changed"),
+            1.0,
+            id="strategy",
+        ),
+        pytest.param(
+            lambda opportunity: setattr(opportunity, "risk_level", RiskLevel.HIGH),
+            1.0,
+            id="risk",
+        ),
+        pytest.param(
+            lambda opportunity: setattr(opportunity, "liquidity_score", 0.1),
+            1.0,
+            id="liquidity",
+        ),
+        pytest.param(None, 0.5, id="size"),
+    ],
+)
+async def test_post_approval_mutations_invalidate_execution(mutation, target_size):
+    opportunity = make_opportunity()
+    manager = approve_for_simulation(opportunity)
+    executor = BasketExecutor(risk_manager=manager)
+
+    if mutation is not None:
+        mutation(opportunity)
+
+    assert manager.has_active_approval(opportunity, target_size) is False
+    with pytest.raises(OpportunityNotApprovedError, match="RiskManager-issued"):
+        await executor.execute_opportunity(opportunity, target_size=target_size)
 
 
 @pytest.mark.asyncio

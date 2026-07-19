@@ -13,7 +13,10 @@ production-readiness claim. The authoritative status matrix is in
   bids for sells, and fee/slippage inputs.
 - ASK/BID orientation checks for long-only basket costs.
 - Liquidity and configurable risk-limit checks with aggregate exposure and leg
-  reservations that must remain active through simulated execution.
+  reservations that must remain active and exactly match their immutable
+  approval-time fingerprint through simulated execution.
+- Coverage scanners that reject an entire event/NegRisk group when any required
+  outcome, token ID, or executable ASK quote is missing.
 - Deterministic paper-fill scenarios, including partial/no-fill inputs, without
   order IDs or order submission.
 - Reporting counters that separate detected, approved, simulated, submitted,

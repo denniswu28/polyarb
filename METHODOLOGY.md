@@ -25,6 +25,11 @@ forecast, performance result, or profit claim.
 The scanner cannot prove these assumptions. Missing, malformed, reference-only,
 or wrong-side prices fail closed in supported long-only scanners.
 
+For single-event and NegRisk coverage baskets, every listed market is a required
+leg. If any required outcome, token ID, market ID, or executable ASK quote is
+missing, the entire group is rejected; the scanner never computes a candidate
+from the remaining subset.
+
 The public Gamma adapter stores `outcomePrices` as reference/display prices.
 Those values may reflect a midpoint or last trade and are never promoted to an
 executable ask or bid. Core-engine `Market` inputs must explicitly provide
@@ -48,8 +53,11 @@ fill ratios and slippage are explicit deterministic inputs. A partial or cancell
 simulation must not be treated as a platform fill or cancellation.
 
 Simulation requires an active reservation from the same `RiskManager` that
-approved the opportunity. Directly changing an opportunity's lifecycle flag does
-not authorize simulation, and releasing a reservation revokes the approval.
+approved the opportunity. Approval records an immutable fingerprint of the exact
+size plus all leg, price, cost, market, strategy, risk, liquidity, and expiry
+inputs. Any post-approval change invalidates execution. Directly changing an
+opportunity's lifecycle flag does not authorize simulation, and releasing a
+reservation revokes the approval.
 
 ## Cross-venue comparison
 
