@@ -25,18 +25,20 @@ class PolymarketPlatform(PlatformInterface):
     EVENTS_ENDPOINT = "/events"
     MARKETS_ENDPOINT = "/markets"
     
-    def __init__(self, api_key: Optional[str] = None, **kwargs):
+    def __init__(self, **kwargs):
         """
         Initialize Polymarket platform interface.
         
         Args:
-            api_key: Optional API key (not required for public endpoints)
             **kwargs: Additional configuration
         """
-        super().__init__(api_key, **kwargs)
+        if kwargs.pop("api_key", None) is not None:
+            raise ValueError(
+                "The public Gamma adapter does not accept API credentials. "
+                "Authenticated CLOB operations are not implemented here."
+            )
+        super().__init__(None, **kwargs)
         self.session = requests.Session()
-        if api_key:
-            self.session.headers.update({"Authorization": f"Bearer {api_key}"})
     
     @property
     def platform_name(self) -> str:
@@ -239,7 +241,6 @@ class PolymarketPlatform(PlatformInterface):
             raise ValueError("Polymarket market payload missing identifier")
 
         question = data.get("question")
-        print(question)
         if not question:
             raise ValueError(
                 f"Market {market_id} missing required question text"
@@ -278,18 +279,6 @@ class PolymarketPlatform(PlatformInterface):
                 market_id,
             )
 
-        if isinstance(outcome_entries, list) and isinstance(outcome_prices, (list, tuple)):
-            if len(outcome_entries) != len(outcome_prices):
-                raise ValueError(
-                    "Market {mid} outcomes/prices length mismatch "
-                    "(outcomes={o_len}, prices={p_len}); payload keys: {keys}".format(
-                        mid=market_id,
-                        o_len=len(outcome_entries),
-                        p_len=len(outcome_prices),
-                        keys=list(data.keys()),
-                    )
-                )
-
         for idx, entry in enumerate(outcome_entries):
             if isinstance(entry, str):
                 outcome_name = entry
@@ -300,11 +289,11 @@ class PolymarketPlatform(PlatformInterface):
                     or entry.get("name")
                     or entry.get("title")
                 )
-                price = (
-                    entry.get("price")
-                    or entry.get("last_price")
-                    or entry.get("lastPrice")
-                )
+                price = entry.get("price")
+                if price is None:
+                    price = entry.get("last_price")
+                if price is None:
+                    price = entry.get("lastPrice")
 
                 if price is None:
                     best_bid = entry.get("best_bid") or entry.get("bestBid")
@@ -317,15 +306,8 @@ class PolymarketPlatform(PlatformInterface):
                     f"{type(entry).__name__}"
                 )
 
-            if (
-                price is None
-                and isinstance(outcome_prices, (list, tuple))
-                and len(outcome_prices) > idx
-            ):
+            if price is None and outcome_prices is not None and len(outcome_prices) > idx:
                 price = outcome_prices[idx]
-            else:
-                print(outcome_prices_raw)
-                raise ValueError("Missing price")
 
             if not outcome_name:
                 raise ValueError(
@@ -382,7 +364,11 @@ class PolymarketPlatform(PlatformInterface):
             prices=prices,
             volume=volume,
             end_date=end_date,
-            metadata=data
+            metadata={
+                **data,
+                "price_semantics": "reference",
+                "price_source": "gamma_display",
+            },
         )
 
     def _coerce_sequence(

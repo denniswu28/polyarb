@@ -22,8 +22,38 @@ class Market:
     metadata: Optional[Dict[str, Any]] = None
     
     def get_price(self, outcome: str) -> Optional[float]:
-        """Get the price for a specific outcome."""
+        """Get the platform's reference/display price for an outcome."""
         return self.prices.get(outcome)
+
+    def get_executable_price(self, outcome: str, side: str) -> Optional[float]:
+        """Return an explicitly supplied executable ask or bid.
+
+        ``prices`` remains the backward-compatible reference/display mapping. The
+        research engine only treats quotes in ``metadata['asks']`` and
+        ``metadata['bids']`` as executable when ``price_semantics`` is explicitly
+        ``'executable'``. This prevents midpoint and last-trade values from being
+        silently treated as order-book prices.
+        """
+        metadata = self.metadata or {}
+        if metadata.get("price_semantics") != "executable":
+            return None
+
+        side_key = {"buy": "asks", "sell": "bids"}.get(side.lower())
+        if side_key is None:
+            raise ValueError("side must be 'buy' or 'sell'")
+
+        quotes = metadata.get(side_key)
+        if not isinstance(quotes, dict):
+            return None
+
+        value = quotes.get(outcome)
+        if value is None:
+            return None
+        try:
+            price = float(value)
+        except (TypeError, ValueError):
+            return None
+        return price if 0 < price <= 1 else None
 
 
 class PlatformInterface(ABC):

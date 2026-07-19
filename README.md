@@ -12,12 +12,12 @@ performance or profit claim is made.
 
 | Surface | Status | Evidence boundary |
 | --- | --- | --- |
-| Core synthetic market scanning | Implemented and tested | Offline intra-venue candidate detection and illustrative cross-venue quote comparison |
-| Polymarket parsing and public-data scanning | Implemented; owner-validated | Live public API use is opt-in and excluded from CI |
-| Price orientation | Implemented and tested | Long-only basket scanners accept executable ASK costs only; BID/MID/LIVE/ACTUAL inputs fail closed |
-| Fees, slippage, liquidity, and risk inputs | Implemented and tested | Explicit research assumptions; not a fill guarantee or platform risk model |
+| Core synthetic market scanning | Implemented and tested | Offline intra-venue baskets use explicit synthetic asks; cross-venue comparisons use asks for buys and bids for sells |
+| Polymarket parsing and public-data scanning | Implemented; owner-validated | Gamma display prices are labeled reference-only; the opt-in CLOB scanner obtains order-book quotes and is excluded from CI |
+| Price orientation | Implemented and tested | Core and enhanced long-only scanners require executable ASK costs; BID/MID/LIVE/ACTUAL/reference inputs fail closed for buys |
+| Fees, slippage, liquidity, and risk inputs | Implemented and tested | Explicit research assumptions; approvals reserve aggregate notional and leg capacity, not fills |
 | Basket execution | Simulated only | Deterministic paper fills; no order IDs, credentials, wallet, funded account, or submission |
-| Research reporting | Implemented with boundaries | Simulations are excluded from submitted, filled, settled, and realized-result counts |
+| Research reporting | Implemented with boundaries | Simulations are excluded from submitted, filled, settled, and realized-result counts; unvalidated live/fill/settlement objects are rejected |
 | SQL storage and optional embedding modules | Experimental | Module surfaces exist; not exercised by the default example or full end-to-end CI |
 | Rule/dependency analysis | Experimental/placeholder | Heuristic framework; no validated LLM integration |
 | PredictIt | Not implemented or validated | Adapter fails closed with `NotImplementedError` |
@@ -73,7 +73,6 @@ python -m examples.demo_with_mock_data
 Optional extras are installed explicitly:
 
 ```bash
-python -m pip install -e ".[clob]"
 python -m pip install -e ".[embeddings]"
 python -m pip install -e ".[postgres]"
 ```
@@ -92,6 +91,11 @@ market = Market(
     question="Synthetic binary outcome?",
     outcomes=["Yes", "No"],
     prices={"Yes": 0.45, "No": 0.50},
+    metadata={
+        "price_semantics": "executable",
+        "asks": {"Yes": 0.45, "No": 0.50},
+        "bids": {"Yes": 0.43, "No": 0.48},
+    },
 )
 
 # A local test platform can expose this Market through PlatformInterface.
@@ -99,14 +103,17 @@ engine = ArbitrageEngine(fee_rate_bps=10, slippage_bps=10)
 ```
 
 See [QUICKSTART.md](QUICKSTART.md) for a complete runnable command. Public
-Polymarket examples in `examples/basic_usage.py` and
-`examples/single_event_multi_market_scan.py` are opt-in network examples; they
-are not part of CI or the default reproduction claim.
+`examples/basic_usage.py` is a credential-free Gamma reference-data inspection.
+`examples/single_event_multi_market_scan.py` is the opt-in public CLOB-quote
+scanner. Neither network example is part of CI or the default reproduction claim.
 
 ## Methodology boundaries
 
 - Long-only basket costs use ASK prices. BID is a sell price; MID and last-trade
   values are references, not executable buy costs.
+- Gamma `outcomePrices` populate the backward-compatible display-price mapping
+  only. They cannot produce an engine candidate without separately supplied
+  executable order-book asks/bids.
 - Candidate arithmetic assumes the selected contracts are mutually exclusive
   and exhaustive and that settlement rules deliver the modeled payoff. The
   scanner does not prove those assumptions.
@@ -116,7 +123,9 @@ are not part of CI or the default reproduction claim.
   equivalence, short/sell availability, transfer constraints, platform rules,
   and atomic execution are not established.
 - A simulation is never included as submitted, filled, settled, or realized
-  performance. Historical backtesting is unavailable.
+  performance. Directly constructed live/fill/settlement records fail closed
+  because no validated provenance-bearing importer exists. Historical
+  backtesting is unavailable.
 
 More detail is in [METHODOLOGY.md](METHODOLOGY.md).
 

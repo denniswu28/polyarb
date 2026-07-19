@@ -1,6 +1,13 @@
 import types
 
+import pytest
+
 from polyarb.data.clob_client import CLOBClient
+
+
+def test_archived_client_integration_fails_closed():
+    with pytest.raises(NotImplementedError, match="archived py-clob-client"):
+        CLOBClient(use_py_clob_client=True)
 
 
 def test_normalize_orderbook_handles_dict_and_lists():

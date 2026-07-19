@@ -38,6 +38,11 @@ def create_demo_data():
             question="Will the next SpaceX launch be successful?",
             outcomes=["Yes", "No"],
             prices={"Yes": 0.43, "No": 0.52},
+            metadata={
+                "price_semantics": "executable",
+                "asks": {"Yes": 0.43, "No": 0.52},
+                "bids": {"Yes": 0.41, "No": 0.50},
+            },
             volume=50000.0
         ),
         Market(
@@ -46,6 +51,11 @@ def create_demo_data():
             question="Will it snow in NYC this weekend?",
             outcomes=["Yes", "No"],
             prices={"Yes": 0.30, "No": 0.70},
+            metadata={
+                "price_semantics": "executable",
+                "asks": {"Yes": 0.30, "No": 0.70},
+                "bids": {"Yes": 0.28, "No": 0.68},
+            },
             volume=10000.0
         ),
         Market(
@@ -54,6 +64,11 @@ def create_demo_data():
             question="Will candidate X win the election?",
             outcomes=["Yes", "No"],
             prices={"Yes": 0.60, "No": 0.38},
+            metadata={
+                "price_semantics": "executable",
+                "asks": {"Yes": 0.60, "No": 0.38},
+                "bids": {"Yes": 0.58, "No": 0.36},
+            },
             volume=100000.0
         ),
     ]
@@ -65,6 +80,11 @@ def create_demo_data():
             question="Will candidate X win the election?",
             outcomes=["Yes", "No"],
             prices={"Yes": 0.72, "No": 0.30},
+            metadata={
+                "price_semantics": "executable",
+                "asks": {"Yes": 0.72, "No": 0.30},
+                "bids": {"Yes": 0.70, "No": 0.28},
+            },
             volume=80000.0
         ),
     ]

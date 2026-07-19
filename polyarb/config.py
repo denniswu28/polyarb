@@ -28,7 +28,6 @@ class Config:
         """Load configuration from environment variables."""
         return {
             # Platform API keys
-            "polymarket_api_key": os.getenv("POLYMARKET_API_KEY"),
             "predictit_api_key": os.getenv("PREDICTIT_API_KEY"),
             "kalshi_api_key": os.getenv("KALSHI_API_KEY"),
             

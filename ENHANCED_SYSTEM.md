@@ -6,18 +6,18 @@ test suite define the supported reproducibility path.
 
 | Module | Current evidence | Important boundary |
 | --- | --- | --- |
-| Data and price access | SQL models, public-data clients, ASK/BID/MID/LIVE/ACTUAL accessors | Only ASK is accepted as a long-only executable buy cost; public live data is opt-in |
+| Data and price access | SQL models, credential-free public-data clients, ASK/BID/MID/LIVE/ACTUAL accessors | Gamma display values are reference-only; only order-book ASK is accepted as a long-only executable buy cost; public live data is opt-in |
 | Strategy templates | `all_no`, balanced, and custom data structures | Logical coverage and rule equivalence require independent review |
 | Embeddings and dependencies | Optional embedding, clustering, vector-store, and heuristic/LLM interfaces | Experimental; no validated LLM pipeline or default offline evidence |
 | Scanners | Single-condition, NegRisk, event-coverage, and template scanners | Candidate arithmetic, not approval, execution, settlement, or performance |
-| Risk and execution | Configurable limits and deterministic paper fills | Live submission is disabled; partial-fill results are simulations only |
-| Reporting | Opportunity and research-metric exports | Simulations cannot contribute to submitted/filled/settled or realized-result fields |
+| Risk and execution | Configurable aggregate approval reservations and deterministic paper fills | Live submission is disabled; partial-fill results are simulations only |
+| Reporting | Opportunity and research-metric exports | Simulations cannot contribute to submitted/filled/settled or realized-result fields; hand-built live records are rejected |
 | Backtester | Compatibility class and result schema | `run_backtest` and price comparison fail closed; historical replay is not implemented |
 
 ## Install optional dependencies
 
 ```bash
-python -m pip install -e ".[embeddings,clob,postgres]"
+python -m pip install -e ".[embeddings,postgres]"
 ```
 
 Each extra is independent. The default install contains the dependencies needed
@@ -52,8 +52,10 @@ but their semantics are constrained:
 
 - `total_theoretical_profit` is a backward-compatible name for summed
   model-implied edge; it is not a result claim.
-- `total_realized_profit` can be populated only by a real `settled` record with
-  a settlement payout and actual cost.
+- `total_realized_profit` remains zero because settlement ingestion is not
+  implemented. Direct or mutated live/fill/settlement records raise
+  `UnvalidatedLiveExecutionError` until a provenance-bearing validated importer
+  exists.
 - simulated fills are counted only as simulations.
 
 ## Experimental example

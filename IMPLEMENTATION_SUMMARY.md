@@ -9,13 +9,16 @@ production-readiness claim. The authoritative status matrix is in
 - Installable package on the Python versions exercised in GitHub Actions.
 - Deterministic synthetic-data scan runnable with
   `python -m examples.demo_with_mock_data`.
-- Core candidate arithmetic with explicit fee and slippage inputs.
+- Core candidate arithmetic with explicit executable asks for buys, executable
+  bids for sells, and fee/slippage inputs.
 - ASK/BID orientation checks for long-only basket costs.
-- Liquidity and configurable risk-limit checks.
+- Liquidity and configurable risk-limit checks with aggregate exposure and leg
+  reservations at approval time.
 - Deterministic paper-fill scenarios, including partial/no-fill inputs, without
   order IDs or order submission.
 - Reporting counters that separate detected, approved, simulated, submitted,
-  filled, partially filled, cancelled, settled, and reported records.
+  filled, partially filled, cancelled, settled, and reported records while
+  rejecting unvalidated live/fill/settlement objects.
 - Fail-closed PredictIt, Kalshi, historical-backtest, and live-order paths.
 - Offline tests, lint, and CI on Windows and Linux.
 

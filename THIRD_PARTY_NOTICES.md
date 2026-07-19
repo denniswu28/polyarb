@@ -1,6 +1,6 @@
 # Third-party review notes
 
-Reviewed 2026-07-18. This is an engineering inventory, not a legal conclusion.
+Reviewed 2026-07-19. This is an engineering inventory, not a legal conclusion.
 License names below are the expressions reported by the linked project metadata;
 the applicable license is the one shipped with the exact artifact that is installed.
 
@@ -12,7 +12,6 @@ the applicable license is the one shipped with the exact artifact that is instal
 | Core | python-dotenv | BSD-3-Clause | [PyPI](https://pypi.org/project/python-dotenv/) |
 | Core | SQLAlchemy | MIT | [PyPI](https://pypi.org/project/SQLAlchemy/) |
 | Core | HTTPX | BSD-3-Clause | [PyPI](https://pypi.org/project/httpx/) |
-| `clob` extra | py-clob-client | MIT | [PyPI](https://pypi.org/project/py-clob-client/) |
 | `embeddings` extra | Chroma | Apache-2.0 | [PyPI](https://pypi.org/project/chromadb/) |
 | `embeddings` extra | NumPy | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | [PyPI](https://pypi.org/project/numpy/) |
 | `embeddings` extra | scikit-learn | BSD-3-Clause | [PyPI](https://pypi.org/project/scikit-learn/) |
@@ -24,9 +23,18 @@ the applicable license is the one shipped with the exact artifact that is instal
 | Development | Ruff | MIT | [PyPI](https://pypi.org/project/ruff/) |
 
 The import surface was compared with `pyproject.toml`: the four packages needed
-by ordinary imports are core dependencies; CLOB, embedding, model, and PostgreSQL
-drivers are extras. `requirements.txt` mirrors the core set and
+by ordinary imports are core dependencies. The unauthenticated read-only CLOB
+path uses core HTTPX; embedding/model and PostgreSQL drivers remain extras.
+`requirements.txt` mirrors the core set and
 `requirements-dev.txt` installs the package's `dev` extra.
+
+The former `py-clob-client` extra and dynamic adapter were removed after review:
+the referenced [client is archived](https://github.com/Polymarket/py-clob-client)
+and the integration did not initialize its published client class. The
+repository has not adopted or tested the separate
+[V2 client](https://github.com/Polymarket/py-clob-client-v2). This is an
+engineering status statement, not a conclusion about either project's terms or
+fitness.
 
 ## API and platform terms to review
 
@@ -55,4 +63,3 @@ live order submission is disabled.
   their own terms and are outside this inventory.
 - Transitive dependencies, binary-component notices, platform-rule changes, and
   redistribution obligations remain unresolved owner/legal-review items.
-

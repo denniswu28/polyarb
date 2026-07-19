@@ -1,4 +1,6 @@
-"""Tests for Polymarket parsing behavior."""
+"""Tests for credential-free Polymarket reference-data parsing."""
+
+import pytest
 
 from polyarb.platforms.polymarket import PolymarketPlatform
 
@@ -19,6 +21,35 @@ def test_parse_market_handles_string_outcomes_with_price_list():
     assert market.outcomes == ["Yes", "No"]
     assert market.prices == {"Yes": 0.55, "No": 0.45}
     assert market.question == "Will it work?"
+    assert market.metadata["price_semantics"] == "reference"
+    assert market.metadata["price_source"] == "gamma_display"
+    assert market.get_executable_price("Yes", "buy") is None
+
+
+def test_parse_market_accepts_prices_embedded_in_token_dicts(capsys):
+    platform = PolymarketPlatform()
+    raw_market = {
+        "id": "token-priced",
+        "question": "Do token prices parse?",
+        "tokens": [
+            {"outcome": "Yes", "price": "0.57"},
+            {"outcome": "No", "price": "0.43"},
+        ],
+        "outcomePrices": ["0.10"],
+    }
+
+    market = platform._parse_market(raw_market)
+
+    assert market.prices == {"Yes": 0.57, "No": 0.43}
+    assert capsys.readouterr().out == ""
+
+
+def test_public_gamma_adapter_never_accepts_or_sends_api_key():
+    platform = PolymarketPlatform()
+
+    assert "Authorization" not in platform.session.headers
+    with pytest.raises(ValueError, match="does not accept API credentials"):
+        PolymarketPlatform(api_key=object())
 
 
 def test_get_markets_paginates_events():

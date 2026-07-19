@@ -40,7 +40,7 @@ raise `NotImplementedError`.
 ## Optional experimental modules
 
 ```bash
-python -m pip install -e ".[embeddings,clob,postgres]"
+python -m pip install -e ".[embeddings,postgres]"
 python -m examples.enhanced_system_demo
 ```
 

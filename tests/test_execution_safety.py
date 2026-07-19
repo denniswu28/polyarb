@@ -13,7 +13,7 @@ from polyarb.execution import (
     RiskLimits,
     RiskManager,
 )
-from polyarb.reporting import PerformanceTracker
+from polyarb.reporting import PerformanceTracker, UnvalidatedLiveExecutionError
 from polyarb.scanner.enhanced_opportunity import (
     EnhancedOpportunity,
     Leg,
@@ -21,13 +21,13 @@ from polyarb.scanner.enhanced_opportunity import (
 )
 
 
-def make_opportunity(*, max_size=2.0, liquidity_score=0.8):
+def make_opportunity(*, max_size=2.0, liquidity_score=0.8, opportunity_id="opp-1"):
     legs = [
         Leg("yes", "YES", "Yes", "market", "Synthetic?", 0.45, "ask", depth=10),
         Leg("no", "NO", "No", "market", "Synthetic?", 0.45, "ask", depth=10),
     ]
     return EnhancedOpportunity(
-        id="opp-1",
+        id=opportunity_id,
         opportunity_class=OpportunityClass.SINGLE_CONDITION,
         name="Synthetic candidate",
         legs=legs,
@@ -60,7 +60,7 @@ def test_risk_limits_reject_exposure_and_liquidity_constraints():
     assert opportunity.lifecycle_state == LifecycleState.DETECTED
 
 
-def test_risk_approval_changes_only_the_approval_state():
+def test_risk_approval_reserves_notional_and_leg_capacity():
     opportunity = make_opportunity()
     manager = RiskManager()
 
@@ -70,6 +70,43 @@ def test_risk_approval_changes_only_the_approval_state():
     assert violations == []
     assert opportunity.lifecycle_state == LifecycleState.APPROVED
     assert opportunity.approved_at is not None
+    summary = manager.get_exposure_summary()
+    assert summary["total_notional"] == pytest.approx(0.90)
+    assert summary["approved_notional"] == pytest.approx(0.90)
+    assert summary["approved_positions"] == 2
+    assert summary["total_positions"] == 2
+
+
+def test_two_leg_approval_cannot_exceed_aggregate_position_cap():
+    opportunity = make_opportunity()
+    manager = RiskManager(RiskLimits(max_positions=1))
+
+    passed, violations = manager.approve_opportunity(opportunity, proposed_size=1.0)
+
+    assert passed is False
+    assert any("max positions limit" in violation for violation in violations)
+    assert manager.get_exposure_summary()["total_notional"] == 0.0
+
+
+def test_repeated_approvals_cannot_exceed_aggregate_notional():
+    first = make_opportunity(opportunity_id="opp-1")
+    second = make_opportunity(opportunity_id="opp-2")
+    manager = RiskManager(RiskLimits(max_total_notional=1.5))
+
+    assert manager.approve_opportunity(first, proposed_size=1.0) == (True, [])
+    passed, violations = manager.approve_opportunity(second, proposed_size=1.0)
+
+    assert passed is False
+    assert any("max total notional" in violation for violation in violations)
+    assert manager.get_exposure_summary()["total_notional"] == pytest.approx(0.90)
+
+
+def test_zero_liquidity_produces_zero_suggested_size():
+    opportunity = make_opportunity(max_size=0.0)
+    manager = RiskManager()
+
+    assert manager.suggest_position_size(opportunity) == 0.0
+    assert manager.suggest_position_size(opportunity, max_size=0.0) == 0.0
 
 
 @pytest.mark.asyncio
@@ -145,7 +182,7 @@ async def test_simulation_is_excluded_from_execution_and_realized_metrics():
     assert metrics.hit_rate == 0.0
 
 
-def test_only_settled_live_record_can_contribute_realized_result():
+def test_direct_live_settlement_record_is_rejected_without_validated_importer():
     opportunity = make_opportunity()
     tracker = PerformanceTracker()
     tracker.add_opportunity(opportunity)
@@ -157,11 +194,28 @@ def test_only_settled_live_record_can_contribute_realized_result():
         actual_cost=0.90,
         settled_payout=1.0,
     )
-    tracker.add_execution(opportunity.id, settlement)
+    with pytest.raises(UnvalidatedLiveExecutionError, match="no provenance-bearing"):
+        tracker.add_execution(opportunity.id, settlement)
 
     metrics = tracker.calculate_metrics()
+    assert metrics.submitted_executions == 0
+    assert metrics.settled_executions == 0
+    assert metrics.total_realized_profit == 0.0
+    assert metrics.hit_rate == 0.0
 
-    assert metrics.submitted_executions == 1
-    assert metrics.settled_executions == 1
-    assert metrics.total_realized_profit == pytest.approx(0.10)
-    assert metrics.hit_rate == 1.0
+
+@pytest.mark.asyncio
+async def test_mutating_stored_simulation_to_live_evidence_fails_closed():
+    opportunity = make_opportunity()
+    opportunity.approve()
+    result = await BasketExecutor().execute_opportunity(opportunity)
+    tracker = PerformanceTracker()
+    tracker.add_execution(opportunity.id, result)
+    tracker.calculate_metrics()
+
+    result.execution_mode = ExecutionMode.LIVE
+    result.lifecycle_state = LifecycleState.SETTLED
+    result.settled_payout = 1.0
+
+    with pytest.raises(UnvalidatedLiveExecutionError, match="no provenance-bearing"):
+        tracker.calculate_metrics()

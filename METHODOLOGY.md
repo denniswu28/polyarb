@@ -25,6 +25,18 @@ forecast, performance result, or profit claim.
 The scanner cannot prove these assumptions. Missing, malformed, reference-only,
 or wrong-side prices fail closed in supported long-only scanners.
 
+The public Gamma adapter stores `outcomePrices` as reference/display prices.
+Those values may reflect a midpoint or last trade and are never promoted to an
+executable ask or bid. Core-engine `Market` inputs must explicitly provide
+order-book `asks` and `bids` with `price_semantics="executable"`; buys use asks
+and sells use bids.
+
+See Polymarket's [price and order-book semantics](https://docs.polymarket.com/concepts/prices-orderbook)
+for the display-price distinction. Public Gamma reads do not require credentials;
+authenticated CLOB operations use a separate signing and header model described
+in the [API overview](https://docs.polymarket.com/api-reference/introduction) and
+[authentication documentation](https://docs.polymarket.com/api-reference/authentication).
+
 ## Liquidity and partial fills
 
 Displayed ask depth constrains modeled size but is not a fill guarantee. Simulated
@@ -43,3 +55,7 @@ adapters are not implemented or validated.
 Historical replay, fill modeling against archived books, settlement ingestion,
 and backtesting are not implemented. No Sharpe ratio, hit rate, return, profit,
 deployment, or live-trading result is supported by this repository.
+
+Because settlement ingestion is absent, reporting rejects direct or mutated
+live, submitted, filled, cancelled, or settled objects. Realized-result fields
+remain zero rather than trusting caller-constructed evidence.

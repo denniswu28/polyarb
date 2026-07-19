@@ -99,7 +99,7 @@ async def main():
     markets: list = []
     outcomes: list = []
 
-    print("Note: Gamma API client has been removed; skipping live data fetch.")
+    print("Note: this offline demo skips the separate opt-in Gamma reference-data adapter.")
     print()
     
     # =================================================================

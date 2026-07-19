@@ -85,8 +85,9 @@ class ArbitrageEngine:
         """
         Find conditional basket candidates within a single platform.
         
-        This looks for markets where the sum of outcome prices is less than 1,
-        under a conditional payoff assumption that must be reviewed separately.
+        This looks for markets where the sum of executable outcome asks is less
+        than 1, under a conditional payoff assumption that must be reviewed
+        separately. Reference, midpoint, and last-trade prices fail closed.
         
         Args:
             platform: Platform to analyze
@@ -99,11 +100,15 @@ class ArbitrageEngine:
         markets = platform.get_markets(limit=100)
 
         for market in markets:
-            if not market.prices or len(market.prices) < 2:
+            ask_prices = {
+                outcome: market.get_executable_price(outcome, "buy")
+                for outcome in market.outcomes
+            }
+            if len(ask_prices) < 2 or any(price is None for price in ask_prices.values()):
                 continue
 
-            # Calculate total price of all outcomes
-            total_price = sum(market.prices.values())
+            # Calculate total price from executable asks only.
+            total_price = sum(price for price in ask_prices.values() if price is not None)
 
             # Skip malformed markets to avoid division errors
             if total_price <= 0:
@@ -120,10 +125,8 @@ class ArbitrageEngine:
                 # Calculate optimal positions
                 strategy = {
                     "action": "buy_all_outcomes",
-                    "positions": {
-                        outcome: price
-                        for outcome, price in market.prices.items()
-                    },
+                    "positions": dict(ask_prices),
+                    "price_semantics": "executable_asks",
                     "total_cost": total_price,
                     "modeled_cost_after_fees_and_slippage": effective_total_price,
                     "fee_rate_bps": self.fee_rate_bps,
@@ -253,22 +256,39 @@ class ArbitrageEngine:
         if len(markets) < 2:
             return opportunities
         
-        # Check for price discrepancies in common outcomes
-        # Find common outcomes
+        # Compare executable asks for buys with executable bids for sells.
         common_outcomes = self._find_common_outcomes(markets)
         
         for outcome in sorted(common_outcomes):
-            prices = []
-            for market in markets:
-                price = market.get_price(outcome)
-                if price is not None and price > 0:
-                    prices.append((market, price))
-            
-            if len(prices) >= 2:
-                # Sort by price
-                prices.sort(key=lambda x: x[1])
-                lowest_price_market, lowest_price = prices[0]
-                highest_price_market, highest_price = prices[-1]
+            executable_pairs = []
+            for buy_market in markets:
+                ask = buy_market.get_executable_price(outcome, "buy")
+                if ask is None:
+                    continue
+                for sell_market in markets:
+                    if sell_market is buy_market or sell_market.platform == buy_market.platform:
+                        continue
+                    bid = sell_market.get_executable_price(outcome, "sell")
+                    if bid is not None:
+                        executable_pairs.append((buy_market, ask, sell_market, bid))
+
+            if executable_pairs:
+                # Stable tie-breaking keeps the offline example reproducible.
+                executable_pairs.sort(
+                    key=lambda item: (
+                        -(item[3] - item[1]),
+                        item[0].platform,
+                        item[0].id,
+                        item[2].platform,
+                        item[2].id,
+                    )
+                )
+                (
+                    lowest_price_market,
+                    lowest_price,
+                    highest_price_market,
+                    highest_price,
+                ) = executable_pairs[0]
                 
                 # Calculate the modeled quote discrepancy after explicit costs.
                 price_diff = highest_price - lowest_price
@@ -286,6 +306,8 @@ class ArbitrageEngine:
                         "buy_price": lowest_price,
                         "sell_platform": highest_price_market.platform,
                         "sell_price": highest_price,
+                        "buy_price_semantics": "executable_ask",
+                        "sell_price_semantics": "executable_bid",
                         "outcome": outcome,
                         "price_difference": price_diff,
                         "model_implied_edge": modeled_edge,

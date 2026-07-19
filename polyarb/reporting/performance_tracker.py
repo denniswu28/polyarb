@@ -10,6 +10,10 @@ from polyarb.core.lifecycle import LifecycleState
 from polyarb.execution.basket_executor import ExecutionMode, ExecutionResult, ExecutionStatus
 
 
+class UnvalidatedLiveExecutionError(RuntimeError):
+    """Raised when unvalidated live/fill/settlement evidence reaches reporting."""
+
+
 @dataclass
 class PerformanceMetrics:
     """Research counters with modeled edge separated from settled outcomes."""
@@ -32,14 +36,14 @@ class PerformanceMetrics:
     # Financial metrics
     total_theoretical_profit: float = 0.0  # Backward-compatible model-implied edge
     total_model_implied_edge: float = 0.0
-    total_realized_profit: float = 0.0
+    total_realized_profit: float = 0.0  # Unsupported until a validated importer exists
     total_cost: float = 0.0
     total_slippage: float = 0.0
     
     # Backward-compatible research/settlement fields
     avg_profit_percentage: float = 0.0
     avg_slippage_bps: float = 0.0
-    hit_rate: float = 0.0  # Positive settled outcomes / settled outcomes only
+    hit_rate: float = 0.0  # Unsupported until a validated importer exists
     
     # Breakdown by category
     by_opportunity_class: Dict[str, Dict[str, float]] = field(default_factory=dict)
@@ -89,12 +93,42 @@ class PerformanceTracker:
         """
         if execution.opportunity_id != opportunity_id:
             raise ValueError("Execution result does not match opportunity_id")
+        self._validate_execution_record(execution)
         self.executions[opportunity_id] = execution
         self._cache_dirty = True
+
+    @staticmethod
+    def _validate_execution_record(execution: ExecutionResult) -> None:
+        """Allow only simulation evidence until a validated importer exists."""
+        simulated_fill_states = {
+            None,
+            ExecutionStatus.FILLED,
+            ExecutionStatus.PARTIALLY_FILLED,
+            ExecutionStatus.CANCELLED,
+        }
+        if (
+            execution.execution_mode != ExecutionMode.SIMULATED
+            or execution.lifecycle_state != LifecycleState.SIMULATED
+            or execution.status != ExecutionStatus.SIMULATED
+            or execution.fill_status not in simulated_fill_states
+            or execution.actual_cost != 0
+            or execution.realized_slippage != 0
+            or execution.settled_payout is not None
+            or any(
+                not leg.is_simulated
+                or leg.order_ids
+                or leg.status not in simulated_fill_states
+                for leg in execution.leg_executions
+            )
+        ):
+            raise UnvalidatedLiveExecutionError(
+                "Live, submitted, filled, cancelled, and settled records are rejected: "
+                "polyarb has no provenance-bearing validated execution/settlement importer."
+            )
     
     def calculate_metrics(self, recalculate: bool = False) -> PerformanceMetrics:
         """
-        Calculate bounded research and imported-settlement metrics.
+        Calculate bounded research and simulation metrics.
         
         Args:
             recalculate: Force recalculation even if cached
@@ -102,6 +136,8 @@ class PerformanceTracker:
         Returns:
             PerformanceMetrics
         """
+        for execution in self.executions.values():
+            self._validate_execution_record(execution)
         if not self._cache_dirty and self._metrics_cache and not recalculate:
             return self._metrics_cache
         
@@ -128,70 +164,24 @@ class PerformanceTracker:
             if opp.reported_at is not None:
                 metrics.reported_records += 1
         
-        # Execution metrics
-        successful = 0
-        failed = 0
-        total_slippage = 0.0
-        total_realized_profit = 0.0
-        positive_settlements = 0
-        
-        for opp_id, execution in self.executions.items():
-            if execution.execution_mode == ExecutionMode.SIMULATED:
-                metrics.simulated_executions += 1
-                if execution.fill_status == ExecutionStatus.PARTIALLY_FILLED:
-                    metrics.partially_filled_executions += 1
-                elif execution.fill_status == ExecutionStatus.CANCELLED:
-                    metrics.cancelled_executions += 1
-                if execution.reported_at is not None:
-                    metrics.reported_records += 1
-                continue
-
-            if execution.lifecycle_state in {
-                LifecycleState.SUBMITTED,
-                LifecycleState.FILLED,
-                LifecycleState.PARTIALLY_FILLED,
-                LifecycleState.CANCELLED,
-                LifecycleState.SETTLED,
-            }:
-                metrics.submitted_executions += 1
-            if execution.lifecycle_state == LifecycleState.FILLED:
-                metrics.filled_executions += 1
-                successful += 1
-                total_slippage += execution.realized_slippage
-            elif execution.lifecycle_state == LifecycleState.PARTIALLY_FILLED:
+        # Execution metrics. Revalidate mutable records on every calculation so a
+        # caller cannot mutate a stored simulation into fabricated live evidence.
+        for execution in self.executions.values():
+            metrics.simulated_executions += 1
+            if execution.fill_status == ExecutionStatus.PARTIALLY_FILLED:
                 metrics.partially_filled_executions += 1
-            elif execution.lifecycle_state == LifecycleState.CANCELLED:
+            elif execution.fill_status == ExecutionStatus.CANCELLED:
                 metrics.cancelled_executions += 1
-                failed += 1
-            elif execution.lifecycle_state == LifecycleState.SETTLED:
-                metrics.settled_executions += 1
-                successful += 1
-                total_slippage += execution.realized_slippage
-                if execution.settled_payout is not None:
-                    settled_result = execution.settled_payout - execution.actual_cost
-                    total_realized_profit += settled_result
-                    if settled_result > 0:
-                        positive_settlements += 1
-
             if execution.reported_at is not None:
                 metrics.reported_records += 1
-        
-        metrics.successful_executions = successful
-        metrics.failed_executions = failed
+
         metrics.executed_opportunities = metrics.submitted_executions
-        metrics.total_realized_profit = total_realized_profit
-        metrics.total_slippage = total_slippage
         
         # Averages
         if metrics.total_opportunities > 0:
             metrics.avg_profit_percentage = sum(
                 o.profit_percentage for o in self.opportunities
             ) / metrics.total_opportunities
-        
-        if successful > 0:
-            metrics.avg_slippage_bps = total_slippage / successful
-        if metrics.settled_executions > 0:
-            metrics.hit_rate = positive_settlements / metrics.settled_executions
         
         # Breakdown by opportunity class
         class_metrics = defaultdict(lambda: {

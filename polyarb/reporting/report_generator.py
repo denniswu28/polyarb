@@ -3,12 +3,16 @@ Report generation for research candidates and explicitly bounded metrics.
 """
 
 import csv
+import html as html_lib
 from typing import List, Optional
 from datetime import datetime
 from pathlib import Path
 
 from polyarb.scanner.enhanced_opportunity import EnhancedOpportunity
-from polyarb.reporting.performance_tracker import PerformanceMetrics
+from polyarb.reporting.performance_tracker import (
+    PerformanceMetrics,
+    UnvalidatedLiveExecutionError,
+)
 
 
 class ReportGenerator:
@@ -47,7 +51,7 @@ class ReportGenerator:
         
         filepath = self.output_dir / filename
         
-        with open(filepath, 'w', newline='') as f:
+        with open(filepath, "w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
             
             # Header
@@ -126,12 +130,13 @@ class ReportGenerator:
             key=lambda o: o.profit_percentage,
             reverse=True
         )
+        escaped_title = html_lib.escape(str(title), quote=True)
         
         html = f"""
 <!DOCTYPE html>
 <html>
 <head>
-    <title>{title}</title>
+    <title>{escaped_title}</title>
     <style>
         body {{
             font-family: Arial, sans-serif;
@@ -185,7 +190,7 @@ class ReportGenerator:
     </style>
 </head>
 <body>
-    <h1>{title}</h1>
+    <h1>{escaped_title}</h1>
     
     <div class="summary">
         <h2>Summary</h2>
@@ -215,6 +220,12 @@ class ReportGenerator:
         for opp in sorted_opps:
             profit_class = "profit-high" if opp.profit_percentage >= 2.0 else "profit-medium"
             risk_class = f"risk-{opp.risk_level.value}"
+            opportunity_class = html_lib.escape(
+                str(opp.opportunity_class.value),
+                quote=True,
+            )
+            opportunity_name = html_lib.escape(str(opp.name[:50]), quote=True)
+            risk_label = html_lib.escape(str(opp.risk_level.value), quote=True)
             adjusted_edge = (
                 f"{opp.adjusted_profit_percentage:.2f}%"
                 if opp.adjusted_profit_percentage is not None
@@ -228,13 +239,13 @@ class ReportGenerator:
             
             html += f"""
             <tr>
-                <td>{opp.opportunity_class.value}</td>
-                <td>{opp.name[:50]}</td>
+                <td>{opportunity_class}</td>
+                <td>{opportunity_name}</td>
                 <td>{len(opp.legs)}</td>
                 <td>{opp.total_cost:.4f}</td>
                 <td class="{profit_class}">{opp.profit_percentage:.2f}%</td>
                 <td>{adjusted_edge}</td>
-                <td class="{risk_class}">{opp.risk_level.value}</td>
+                <td class="{risk_class}">{risk_label}</td>
                 <td>{liquidity}</td>
                 <td>{'✓' if opp.is_pure_arbitrage else '✗'}</td>
             </tr>
@@ -247,7 +258,7 @@ class ReportGenerator:
 </html>
 """
         
-        with open(filepath, 'w') as f:
+        with open(filepath, "w", encoding="utf-8", newline="") as f:
             f.write(html)
         
         return str(filepath)
@@ -272,6 +283,24 @@ class ReportGenerator:
             filename = f"research_metrics_{timestamp}.html"
         
         filepath = self.output_dir / filename
+
+        unsupported_live_fields = {
+            "executed_opportunities": metrics.executed_opportunities,
+            "successful_executions": metrics.successful_executions,
+            "failed_executions": metrics.failed_executions,
+            "submitted_executions": metrics.submitted_executions,
+            "filled_executions": metrics.filled_executions,
+            "settled_executions": metrics.settled_executions,
+            "total_realized_profit": metrics.total_realized_profit,
+            "total_slippage": metrics.total_slippage,
+            "avg_slippage_bps": metrics.avg_slippage_bps,
+            "hit_rate": metrics.hit_rate,
+        }
+        if any(value != 0 for value in unsupported_live_fields.values()):
+            raise UnvalidatedLiveExecutionError(
+                "Live/fill/settlement metrics cannot be reported because no "
+                "provenance-bearing validated importer exists."
+            )
         
         html = f"""
 <!DOCTYPE html>
@@ -325,7 +354,8 @@ class ReportGenerator:
 <body>
     <h1>Research Metrics Report</h1>
     <p>Detected candidates and simulations are not live orders or performance.
-    Settled-result fields require a real settlement record.</p>
+    Live/fill/settlement ingestion is unavailable and rejected, so realized-result
+    fields remain zero.</p>
     
     <div class="section">
         <h2>Overview</h2>
@@ -354,8 +384,8 @@ class ReportGenerator:
             <div class="metric-label">Total Model-Implied Edge</div>
         </div>
         <div class="metric">
-            <div class="metric-value">${metrics.total_realized_profit:.2f}</div>
-            <div class="metric-label">Settled Result (Requires Settlement)</div>
+            <div class="metric-value">Unavailable</div>
+            <div class="metric-label">Realized Result (No Validated Importer)</div>
         </div>
         <div class="metric">
             <div class="metric-value">{metrics.avg_profit_percentage:.2f}%</div>
@@ -379,9 +409,10 @@ class ReportGenerator:
 """
         
         for opp_class, data in metrics.by_opportunity_class.items():
+            escaped_class = html_lib.escape(str(opp_class), quote=True)
             html += f"""
             <tr>
-                <td>{opp_class}</td>
+                <td>{escaped_class}</td>
                 <td>{data['count']}</td>
                 <td>${data['total_profit']:.2f}</td>
                 <td>{data['avg_profit_pct']:.2f}%</td>
@@ -404,9 +435,10 @@ class ReportGenerator:
 """
         
         for topic, data in metrics.by_topic.items():
+            escaped_topic = html_lib.escape(str(topic), quote=True)
             html += f"""
             <tr>
-                <td>{topic}</td>
+                <td>{escaped_topic}</td>
                 <td>{data['count']}</td>
                 <td>${data['total_profit']:.2f}</td>
                 <td>{data['avg_profit_pct']:.2f}%</td>
@@ -420,7 +452,7 @@ class ReportGenerator:
 </html>
 """
         
-        with open(filepath, 'w') as f:
+        with open(filepath, "w", encoding="utf-8", newline="") as f:
             f.write(html)
         
         return str(filepath)
