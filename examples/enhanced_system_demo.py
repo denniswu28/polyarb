@@ -293,7 +293,8 @@ async def main():
     
     executor = BasketExecutor(
         max_slippage_bps=50,
-        min_fill_rate=0.8
+        min_fill_rate=0.8,
+        risk_manager=risk_manager,
     )
     
     executions = []

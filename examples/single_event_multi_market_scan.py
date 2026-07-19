@@ -10,6 +10,7 @@ approve, simulate, or submit orders.
 
 import argparse
 import asyncio
+import json
 from typing import Any, Dict, List
 
 import requests
@@ -21,6 +22,47 @@ from polyarb.scanner import SingleEventMultiMarketScanner
 
 
 GAMMA_EVENTS_URL = "https://gamma-api.polymarket.com/events"
+
+
+def _parse_gamma_array(value: Any) -> List[Any]:
+    """Return a Gamma array from either its JSON-string or list representation."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
+    return value if isinstance(value, list) else []
+
+
+def _normalize_outcomes(market: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Pair current Gamma outcome labels with their corresponding CLOB token IDs."""
+    raw_outcomes = _parse_gamma_array(market.get("outcomes"))
+    if not raw_outcomes:
+        return []
+
+    # Retain compatibility with the earlier dictionary representation.
+    if all(isinstance(outcome, dict) for outcome in raw_outcomes):
+        normalized = []
+        for outcome in raw_outcomes:
+            token_id = outcome.get("tokenId") or outcome.get("yesTokenId")
+            if token_id:
+                normalized.append(
+                    {
+                        "label": str(outcome.get("name") or outcome.get("label") or "Yes"),
+                        "yes_token_id": str(token_id),
+                    }
+                )
+        return normalized
+
+    token_ids = _parse_gamma_array(market.get("clobTokenIds"))
+    if len(raw_outcomes) != len(token_ids):
+        return []
+
+    return [
+        {"label": str(label), "yes_token_id": str(token_id)}
+        for label, token_id in zip(raw_outcomes, token_ids)
+        if label is not None and token_id
+    ]
 
 
 def fetch_markets(limit: int = 200) -> List[Dict[str, Any]]:
@@ -45,20 +87,7 @@ def fetch_markets(limit: int = 200) -> List[Dict[str, Any]]:
     for event in events:
         event_id = event.get("id")
         for market in event.get("markets") or []:
-            # Extract YES token IDs from the outcome entries. Gamma responses use
-            # "tokenId" or "yesTokenId" depending on the market type.
-            outcomes = []
-            for outcome in market.get("outcomes") or []:
-                yes_token_id = outcome.get("tokenId") or outcome.get("yesTokenId")
-                if not yes_token_id:
-                    continue
-
-                outcomes.append(
-                    {
-                        "label": outcome.get("name") or outcome.get("label") or "Yes",
-                        "yes_token_id": yes_token_id,
-                    }
-                )
+            outcomes = _normalize_outcomes(market)
 
             if not outcomes:
                 continue

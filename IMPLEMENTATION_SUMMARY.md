@@ -13,7 +13,7 @@ production-readiness claim. The authoritative status matrix is in
   bids for sells, and fee/slippage inputs.
 - ASK/BID orientation checks for long-only basket costs.
 - Liquidity and configurable risk-limit checks with aggregate exposure and leg
-  reservations at approval time.
+  reservations that must remain active through simulated execution.
 - Deterministic paper-fill scenarios, including partial/no-fill inputs, without
   order IDs or order submission.
 - Reporting counters that separate detected, approved, simulated, submitted,
@@ -27,7 +27,8 @@ production-readiness claim. The authoritative status matrix is in
 - SQLAlchemy models and optional PostgreSQL configuration.
 - Embeddings, clustering, and vector-store modules behind optional dependencies.
 - Strategy-template and heuristic rule/dependency analysis surfaces.
-- CSV/HTML research report generation.
+- CSV/HTML research report generation with UTF-8 output, HTML escaping, and
+  neutralization of formula-leading external CSV text.
 - Opt-in Polymarket public-API examples.
 
 These surfaces are not demonstrated as an end-to-end system by the default

@@ -29,6 +29,15 @@ class ReportGenerator:
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _spreadsheet_safe_text(value: object) -> str:
+        """Neutralize external text that spreadsheet programs may treat as a formula."""
+        text = "" if value is None else str(value)
+        stripped = text.lstrip(" \t\r\n")
+        if text.startswith(("\t", "\r", "\n")) or stripped.startswith(("=", "+", "-", "@")):
+            return f"'{text}"
+        return text
     
     def generate_opportunities_csv(
         self,
@@ -77,9 +86,9 @@ class ReportGenerator:
             # Data rows
             for opp in opportunities:
                 writer.writerow([
-                    opp.id,
+                    self._spreadsheet_safe_text(opp.id),
                     opp.opportunity_class.value,
-                    opp.name,
+                    self._spreadsheet_safe_text(opp.name),
                     len(opp.legs),
                     f"{opp.total_cost:.4f}",
                     f"{opp.expected_profit:.4f}",
@@ -94,7 +103,7 @@ class ReportGenerator:
                     f"{opp.max_size:.0f}" if opp.max_size is not None else "",
                     len(opp.market_ids),
                     opp.is_pure_arbitrage,
-                    opp.topic or "",
+                    self._spreadsheet_safe_text(opp.topic),
                     opp.lifecycle_state.value,
                     opp.discovered_at.isoformat()
                 ])

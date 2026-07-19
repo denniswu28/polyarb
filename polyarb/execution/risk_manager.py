@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from polyarb.core.lifecycle import LifecycleState
 from polyarb.scanner.enhanced_opportunity import EnhancedOpportunity, RiskLevel
 
 
@@ -14,7 +15,6 @@ class RiskLimits:
     max_total_notional: float = 10000.0
     max_per_strategy_notional: float = 2000.0
     max_per_market_notional: float = 1000.0
-    max_per_entity_notional: float = 500.0
     max_per_topic_notional: float = 3000.0
 
     # Position limits
@@ -28,6 +28,10 @@ class RiskLimits:
     # Execution limits
     max_slippage_tolerance: float = 50
     min_liquidity_score: float = 0.3
+
+    def __post_init__(self) -> None:
+        if self.max_slippage_tolerance < 0:
+            raise ValueError("max_slippage_tolerance must be non-negative")
 
 
 class RiskManager:
@@ -76,6 +80,7 @@ class RiskManager:
 
         return {
             "opportunity_id": opportunity.id,
+            "opportunity": opportunity,
             "size": size,
             "total_notional": total_notional,
             "position_count": len(opportunity.legs),
@@ -226,11 +231,27 @@ class RiskManager:
             opportunity.approve()
         return passed, violations
 
+    def has_active_approval(
+        self,
+        opportunity: EnhancedOpportunity,
+        requested_size: float,
+    ) -> bool:
+        """Return whether this manager has an active reservation for this object."""
+        proposal = self.approvals.get(opportunity.id)
+        return bool(
+            proposal is not None
+            and proposal.get("opportunity") is opportunity
+            and opportunity.lifecycle_state == LifecycleState.APPROVED
+            and requested_size > 0
+            and requested_size <= proposal["size"] + 1e-12
+        )
+
     def release_approval(self, opportunity_id: str) -> None:
-        """Release an unmaterialized approval reservation."""
+        """Release an unmaterialized reservation and revoke approval state."""
         proposal = self.approvals.pop(opportunity_id, None)
         if proposal is not None:
             self._adjust_aggregates(proposal, -1.0)
+            proposal["opportunity"].revoke_approval()
 
     def add_position(
         self,
@@ -242,6 +263,8 @@ class RiskManager:
         proposal = self.approvals.get(opportunity.id)
         if proposal is None:
             raise ValueError("A matching risk approval is required before adding positions")
+        if proposal.get("opportunity") is not opportunity:
+            raise ValueError("The risk approval belongs to a different opportunity object")
         if abs(proposal["size"] - size) > 1e-12:
             raise ValueError("Position size must match the approved reservation")
         if any(leg.token_id in self.positions for leg in opportunity.legs):

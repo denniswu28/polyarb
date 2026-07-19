@@ -3,10 +3,13 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional, Sequence
+from typing import TYPE_CHECKING, List, Optional, Sequence
 
 from polyarb.core.lifecycle import LifecycleState
 from polyarb.scanner.enhanced_opportunity import EnhancedOpportunity, Leg
+
+if TYPE_CHECKING:
+    from polyarb.execution.risk_manager import RiskManager
 
 
 class ExecutionMode(str, Enum):
@@ -133,6 +136,7 @@ class BasketExecutor:
         min_fill_rate: float = 0.8,
         execution_timeout: int = 60,
         execution_mode: ExecutionMode = ExecutionMode.SIMULATED,
+        risk_manager: Optional["RiskManager"] = None,
     ):
         if max_slippage_bps < 0:
             raise ValueError("max_slippage_bps must be non-negative")
@@ -143,6 +147,7 @@ class BasketExecutor:
         self.min_fill_rate = min_fill_rate
         self.execution_timeout = execution_timeout
         self.execution_mode = ExecutionMode(execution_mode)
+        self.risk_manager = risk_manager
 
     async def execute_opportunity(
         self,
@@ -157,9 +162,13 @@ class BasketExecutor:
             raise LiveExecutionDisabledError(
                 "Live order submission is disabled and not implemented in polyarb."
             )
-        if opportunity.lifecycle_state != LifecycleState.APPROVED:
+        if self.risk_manager is None or not self.risk_manager.has_active_approval(
+            opportunity,
+            target_size,
+        ):
             raise OpportunityNotApprovedError(
-                "Opportunity must be explicitly approved before simulated execution."
+                "Simulated execution requires an active RiskManager-issued "
+                "approval reservation for this opportunity and size."
             )
         if target_size <= 0:
             raise ValueError("target_size must be positive")
@@ -254,7 +263,13 @@ class BasketExecutor:
         """Create one deterministic simulated leg result."""
         del aggressive, opportunity
         applied_slippage = 5.0 if slippage_bps is None else slippage_bps
-        if fill_ratio == 0 or applied_slippage > self.max_slippage_bps:
+        risk_slippage_limit = (
+            self.risk_manager.limits.max_slippage_tolerance
+            if self.risk_manager is not None
+            else self.max_slippage_bps
+        )
+        allowed_slippage = min(self.max_slippage_bps, risk_slippage_limit)
+        if fill_ratio == 0 or applied_slippage > allowed_slippage:
             reason = (
                 "simulated no-fill"
                 if fill_ratio == 0

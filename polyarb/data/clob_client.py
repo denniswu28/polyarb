@@ -102,17 +102,13 @@ class CLOBClient:
                 return price
 
         price = None
-        url = f"{self.base_url}/trades"
-        params = {
-            "market": token_id,
-            "limit": 1
-        }
+        url = f"{self.base_url}/last-trade-price"
+        params = {"token_id": token_id}
 
         try:
             response = await self.client.get(url, params=params)
             response.raise_for_status()
-            trades = response.json()
-            price = self._extract_trade_price(trades)
+            price = self._extract_trade_price(response.json())
         except httpx.HTTPError:
             pass
 
@@ -315,9 +311,15 @@ class CLOBClient:
 
     @staticmethod
     def _extract_trade_price(trades: Any) -> Optional[float]:
-        """Extract a price float from trades payloads."""
+        """Extract a price from the public last-trade response or legacy payloads."""
         if not trades:
             return None
+
+        if isinstance(trades, dict) and "price" in trades:
+            try:
+                return float(trades["price"])
+            except (TypeError, ValueError):
+                return None
 
         # Public endpoints may wrap the trade list in "trades" or "data".
         if isinstance(trades, dict) and "trades" in trades:

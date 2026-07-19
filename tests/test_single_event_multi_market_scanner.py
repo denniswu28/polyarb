@@ -1,5 +1,9 @@
+import json
+from pathlib import Path
+
 import pytest
 
+from examples import single_event_multi_market_scan as live_example
 from polyarb.scanner.single_event_multi_market_scanner import (
     SingleEventMultiMarketScanner,
 )
@@ -19,6 +23,32 @@ class DummyPriceAccessor:
 
     async def get_price(self, token_id, price_type, side="buy"):
         return self.prices.get(token_id)
+
+
+def test_live_example_parses_current_gamma_string_arrays(monkeypatch):
+    fixture_path = Path(__file__).parent / "fixtures" / "gamma_current_schema.json"
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+    class FixtureResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return payload
+
+    monkeypatch.setattr(live_example.requests, "get", lambda *args, **kwargs: FixtureResponse())
+
+    assert live_example.fetch_markets(limit=1) == [
+        {
+            "id": "market-current-schema",
+            "event_id": "event-current-schema",
+            "question": "Will the synthetic condition resolve Yes?",
+            "outcomes": [
+                {"label": "Yes", "yes_token_id": "token-yes"},
+                {"label": "No", "yes_token_id": "token-no"},
+            ],
+        }
+    ]
 
 
 @pytest.mark.asyncio

@@ -42,6 +42,12 @@ def make_opportunity(*, max_size=2.0, liquidity_score=0.8, opportunity_id="opp-1
     )
 
 
+def approve_for_simulation(opportunity, *, limits=None, size=1.0):
+    manager = RiskManager(limits)
+    assert manager.approve_opportunity(opportunity, proposed_size=size) == (True, [])
+    return manager
+
+
 def test_risk_limits_reject_exposure_and_liquidity_constraints():
     opportunity = make_opportunity(max_size=0.5, liquidity_score=0.1)
     manager = RiskManager(
@@ -112,12 +118,17 @@ def test_zero_liquidity_produces_zero_suggested_size():
 @pytest.mark.asyncio
 async def test_simulation_requires_approval_and_records_partial_fill_without_order_ids():
     opportunity = make_opportunity()
-    executor = BasketExecutor(max_slippage_bps=50, min_fill_rate=0.8)
+    manager = RiskManager()
+    executor = BasketExecutor(
+        max_slippage_bps=50,
+        min_fill_rate=0.8,
+        risk_manager=manager,
+    )
 
     with pytest.raises(OpportunityNotApprovedError):
         await executor.execute_opportunity(opportunity)
 
-    opportunity.approve()
+    assert manager.approve_opportunity(opportunity, proposed_size=1.0) == (True, [])
     result = await executor.execute_opportunity(
         opportunity,
         simulation_fill_ratios=[1.0, 0.5],
@@ -135,10 +146,38 @@ async def test_simulation_requires_approval_and_records_partial_fill_without_ord
 
 
 @pytest.mark.asyncio
-async def test_simulated_slippage_limit_cancels_leg():
+async def test_direct_approval_cannot_bypass_risk_manager_limits():
     opportunity = make_opportunity()
     opportunity.approve()
-    executor = BasketExecutor(max_slippage_bps=20)
+    manager = RiskManager(RiskLimits(max_total_notional=0.0, max_positions=0))
+    executor = BasketExecutor(risk_manager=manager)
+
+    with pytest.raises(OpportunityNotApprovedError, match="RiskManager-issued"):
+        await executor.execute_opportunity(opportunity)
+
+
+@pytest.mark.asyncio
+async def test_released_approval_cannot_be_executed():
+    opportunity = make_opportunity()
+    manager = approve_for_simulation(opportunity)
+    executor = BasketExecutor(risk_manager=manager)
+
+    manager.release_approval(opportunity.id)
+
+    assert opportunity.lifecycle_state == LifecycleState.DETECTED
+    assert manager.get_exposure_summary()["approved_notional"] == 0.0
+    with pytest.raises(OpportunityNotApprovedError, match="RiskManager-issued"):
+        await executor.execute_opportunity(opportunity)
+
+
+@pytest.mark.asyncio
+async def test_risk_slippage_tolerance_cancels_leg():
+    opportunity = make_opportunity()
+    manager = approve_for_simulation(
+        opportunity,
+        limits=RiskLimits(max_slippage_tolerance=20),
+    )
+    executor = BasketExecutor(max_slippage_bps=100, risk_manager=manager)
 
     result = await executor.execute_opportunity(
         opportunity,
@@ -153,7 +192,6 @@ async def test_simulated_slippage_limit_cancels_leg():
 @pytest.mark.asyncio
 async def test_live_order_paths_fail_closed():
     opportunity = make_opportunity()
-    opportunity.approve()
     executor = BasketExecutor(execution_mode=ExecutionMode.LIVE)
 
     with pytest.raises(LiveExecutionDisabledError, match="disabled"):
@@ -165,8 +203,8 @@ async def test_live_order_paths_fail_closed():
 @pytest.mark.asyncio
 async def test_simulation_is_excluded_from_execution_and_realized_metrics():
     opportunity = make_opportunity()
-    opportunity.approve()
-    result = await BasketExecutor().execute_opportunity(opportunity)
+    manager = approve_for_simulation(opportunity)
+    result = await BasketExecutor(risk_manager=manager).execute_opportunity(opportunity)
     tracker = PerformanceTracker()
     tracker.add_opportunity(opportunity)
     tracker.add_execution(opportunity.id, result)
@@ -207,8 +245,8 @@ def test_direct_live_settlement_record_is_rejected_without_validated_importer():
 @pytest.mark.asyncio
 async def test_mutating_stored_simulation_to_live_evidence_fails_closed():
     opportunity = make_opportunity()
-    opportunity.approve()
-    result = await BasketExecutor().execute_opportunity(opportunity)
+    manager = approve_for_simulation(opportunity)
+    result = await BasketExecutor(risk_manager=manager).execute_opportunity(opportunity)
     tracker = PerformanceTracker()
     tracker.add_execution(opportunity.id, result)
     tracker.calculate_metrics()

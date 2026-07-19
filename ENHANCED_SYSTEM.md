@@ -26,15 +26,24 @@ for the supported scanners, price access, simulation, reporting, and tests.
 ## Simulated execution
 
 ```python
-from polyarb.execution import BasketExecutor, ExecutionMode
+from polyarb.execution import BasketExecutor, ExecutionMode, RiskManager
 
-executor = BasketExecutor(execution_mode=ExecutionMode.SIMULATED)
+risk_manager = RiskManager()
+approved, violations = risk_manager.approve_opportunity(opportunity, proposed_size=1.0)
+if not approved:
+    raise ValueError(violations)
 
-# An EnhancedOpportunity must first pass RiskManager.approve_opportunity().
+executor = BasketExecutor(
+    execution_mode=ExecutionMode.SIMULATED,
+    risk_manager=risk_manager,
+)
+
+# A lifecycle flag alone is insufficient: the same RiskManager must retain the
+# active reservation when the simulation starts.
 # The result remains lifecycle_state="simulated" even when its hypothetical
 # fill_status is "filled". No order ID is created.
 result = await executor.execute_opportunity(
-    approved_opportunity,
+    opportunity,
     target_size=1.0,
     simulation_fill_ratios=[1.0, 0.5],
     simulation_slippage_bps=[5.0, 10.0],

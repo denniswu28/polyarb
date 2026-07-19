@@ -36,12 +36,20 @@ for the display-price distinction. Public Gamma reads do not require credentials
 authenticated CLOB operations use a separate signing and header model described
 in the [API overview](https://docs.polymarket.com/api-reference/introduction) and
 [authentication documentation](https://docs.polymarket.com/api-reference/authentication).
+The `LIVE` reference-price accessor uses the unauthenticated public
+[`/last-trade-price`](https://docs.polymarket.com/api-reference/market-data/get-last-trade-price)
+endpoint; last trade remains reference data and is rejected as a buy-side
+executable quote.
 
 ## Liquidity and partial fills
 
 Displayed ask depth constrains modeled size but is not a fill guarantee. Simulated
 fill ratios and slippage are explicit deterministic inputs. A partial or cancelled
 simulation must not be treated as a platform fill or cancellation.
+
+Simulation requires an active reservation from the same `RiskManager` that
+approved the opportunity. Directly changing an opportunity's lifecycle flag does
+not authorize simulation, and releasing a reservation revokes the approval.
 
 ## Cross-venue comparison
 

@@ -104,9 +104,15 @@ class EnhancedOpportunity:
     reported_at: Optional[datetime] = None
 
     def approve(self) -> None:
-        """Record risk/methodology approval without implying order submission."""
+        """Record approval state; execution also requires a RiskManager reservation."""
         self.lifecycle_state = LifecycleState.APPROVED
         self.approved_at = datetime.utcnow()
+
+    def revoke_approval(self) -> None:
+        """Return an unexecuted approval to detected state."""
+        if self.lifecycle_state == LifecycleState.APPROVED:
+            self.lifecycle_state = LifecycleState.DETECTED
+            self.approved_at = None
 
     def mark_reported(self) -> None:
         """Record that the detected opportunity was included in a report."""
