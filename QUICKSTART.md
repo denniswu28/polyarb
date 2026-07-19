@@ -1,132 +1,50 @@
-# Quick Start Guide
+# Quick start: deterministic offline scan
 
-## Installation
+Supported Python versions are 3.10, 3.11, and 3.12, as exercised in CI.
+
+From a fresh clone on Windows or Linux:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install .
+python -m examples.demo_with_mock_data
 ```
 
-## Basic Usage
+The example uses committed synthetic data. It does not require a network,
+credential, wallet, funded account, or private record, and it cannot submit an
+order. Its output is a list of model-implied research candidates under printed
+fee and slippage assumptions—not trades or performance.
 
-### 1. Run the Demo (Recommended First Step)
+## Development checks
+
 ```bash
-cd /home/runner/work/polyarb/polyarb
-PYTHONPATH=/home/runner/work/polyarb/polyarb:$PYTHONPATH python examples/demo_with_mock_data.py
+python -m pip install -e ".[dev]"
+python -m pytest -q
+python -m ruff check .
+python -m examples.demo_with_mock_data
 ```
 
-This will show you 4 example arbitrage opportunities using mock data.
+## Opt-in network examples
 
-### 2. Try Real Polymarket Data
+These commands contact Polymarket public endpoints and are intentionally excluded
+from tests and CI:
+
 ```bash
-PYTHONPATH=/home/runner/work/polyarb/polyarb:$PYTHONPATH python examples/basic_usage.py
+python -m examples.basic_usage
+python -m examples.single_event_multi_market_scan --limit 200 --min-profit 0.5
 ```
 
-Note: Requires internet connection to Polymarket API.
+They do not enable live order submission. Review current platform access and data
+terms before running them. PredictIt and Kalshi adapters are not implemented and
+raise `NotImplementedError`.
 
-### 3. Run the Single-Event Multi-Market Scanner (live data)
+## Optional experimental modules
+
 ```bash
-PYTHONPATH=/home/runner/work/polyarb/polyarb:$PYTHONPATH python examples/single_event_multi_market_scan.py --limit 200 --min-profit 0.5
+python -m pip install -e ".[embeddings,clob,postgres]"
+python -m examples.enhanced_system_demo
 ```
 
-This command pulls active events from Polymarket's Gamma API and scans for "other"-covered events where buying YES on every market costs less than $1.
+The enhanced demo is experimental and is not the supported reproducibility path.
+Historical backtesting, dashboards, and live execution are not implemented.
 
-### 4. Explore the Enhanced System
-```bash
-PYTHONPATH=/home/runner/work/polyarb/polyarb:$PYTHONPATH python examples/enhanced_system_demo.py
-```
-
-This runs the comprehensive demo that wires together the enhanced architecture modules (data, strategy templates, embeddings, scanners, execution, and reporting). See `ENHANCED_SYSTEM.md` for a module-by-module overview.
-
-### 5. Run Tests
-```bash
-PYTHONPATH=/home/runner/work/polyarb/polyarb:$PYTHONPATH python -m pytest tests/ -v
-```
-
-## Simple Python Script
-
-```python
-from polyarb import ArbitrageEngine
-from polyarb.platforms.polymarket import PolymarketPlatform
-
-# Initialize
-polymarket = PolymarketPlatform()
-engine = ArbitrageEngine(platforms=[polymarket], min_profit_threshold=1.0)
-
-# Find opportunities
-opportunities = engine.find_opportunities()
-
-# Display
-for opp in opportunities:
-    print(f"Profit: {opp.profit_percentage:.2f}%")
-    print(f"Type: {opp.opportunity_type.value}")
-    print(f"Description: {opp.description}")
-    print()
-```
-
-## Configuration
-
-Create a `.env` file:
-```bash
-POLYMARKET_API_KEY=your_key_here
-MIN_PROFIT_THRESHOLD=1.0
-MAX_TOTAL_PRICE_THRESHOLD=0.98
-```
-
-Then use:
-```python
-from polyarb.config import Config
-
-config = Config()
-min_profit = config.get("min_profit_threshold", 1.0)
-```
-
-## Adding New Platforms
-
-See `examples/add_custom_platform.py` for a complete tutorial.
-
-Quick version:
-```python
-from polyarb.platforms.base import PlatformInterface, Market
-
-class MyPlatform(PlatformInterface):
-    @property
-    def platform_name(self) -> str:
-        return "MyPlatform"
-    
-    def get_markets(self, limit=None):
-        # Fetch from your API
-        return [Market(...)]
-    
-    def get_market(self, market_id):
-        # Fetch single market
-        return Market(...)
-```
-
-## Project Structure
-
-```
-polyarb/
-├── polyarb/              # Main package
-│   ├── core/            # Arbitrage engine & opportunity models
-│   ├── platforms/       # Platform integrations
-│   └── config.py        # Configuration management
-├── examples/            # Usage examples
-├── tests/              # Test suite
-└── README.md           # Full documentation
-```
-
-## Two Types of Arbitrage
-
-### Intra-Platform
-When sum of outcome prices < 1, buy all outcomes for guaranteed profit.
-
-Example: Yes=$0.45, No=$0.50 → Total=$0.95 → Profit=5.26%
-
-### Cross-Platform
-When same market has different prices across platforms.
-
-Example: Platform A: Yes=$0.60, Platform B: Yes=$0.72 → Profit=20%
-
-## Support
-
-See README.md for full documentation.
+See [README.md](README.md) for the evidence matrix and lifecycle definitions.

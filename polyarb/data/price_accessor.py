@@ -4,9 +4,8 @@ Price accessor for retrieving token prices by type (ASK, BID, MID, LIVE, ACTUAL)
 
 from typing import Optional, Dict, List
 from datetime import datetime, timedelta
-from decimal import Decimal
 
-from polyarb.data.models import PriceType, OrderBookSnapshot, Trade
+from polyarb.data.models import PriceType, Trade
 from polyarb.data.clob_client import CLOBClient
 from sqlalchemy.orm import Session
 
@@ -56,6 +55,14 @@ class PriceAccessor:
         Returns:
             Price as float, or None if not available
         """
+        side = side.lower()
+        if side not in {"buy", "sell"}:
+            raise ValueError("side must be 'buy' or 'sell'")
+        if price_type == PriceType.ASK and side != "buy":
+            raise ValueError("ASK is a buy-side executable price")
+        if price_type == PriceType.BID and side != "sell":
+            raise ValueError("BID is a sell-side executable price")
+
         cache_key = (token_id, price_type, side, user_id)
         
         # Check cache first (except for ACTUAL which should always be fresh)
@@ -97,7 +104,7 @@ class PriceAccessor:
         
         asks = orderbook.get("asks", [])
         if asks:
-            return float(asks[0]["price"])
+            return min(float(level["price"]) for level in asks)
         
         return None
     
@@ -111,7 +118,7 @@ class PriceAccessor:
         
         bids = orderbook.get("bids", [])
         if bids:
-            return float(bids[0]["price"])
+            return max(float(level["price"]) for level in bids)
         
         return None
     
@@ -126,8 +133,8 @@ class PriceAccessor:
         asks = orderbook.get("asks", [])
         
         if bids and asks:
-            bid = float(bids[0]["price"])
-            ask = float(asks[0]["price"])
+            bid = max(float(level["price"]) for level in bids)
+            ask = min(float(level["price"]) for level in asks)
             return (bid + ask) / 2
         
         return None

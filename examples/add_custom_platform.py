@@ -1,7 +1,6 @@
-"""
-Example: How to add a new platform integration.
+"""Experimental platform-adapter skeleton using deterministic synthetic data.
 
-This example shows how to extend polyarb with a new prediction market platform.
+This is not a validated integration and performs no network or credentialed work.
 """
 
 from typing import List, Optional
@@ -99,10 +98,7 @@ def main():
     print()
     
     # Step 4: Initialize your custom platform
-    custom_platform = CustomPlatform(
-        api_key="your_api_key_here",
-        base_url="https://api.customplatform.com"
-    )
+    custom_platform = CustomPlatform(base_url="https://api.invalid")
     
     print(f"✓ Initialized {custom_platform.platform_name}")
     print()
@@ -128,8 +124,8 @@ def main():
             print(f"    {outcome}: ${price:.2f}")
     print()
     
-    # Step 7: Find arbitrage opportunities
-    print("Searching for arbitrage opportunities...")
+    # Step 7: Find model-implied research candidates
+    print("Searching the synthetic quotes for research candidates...")
     opportunities = engine.find_opportunities()
     
     if opportunities:
@@ -139,7 +135,7 @@ def main():
     
     print()
     print("=" * 70)
-    print("That's it! Your custom platform is now integrated.")
+    print("The synthetic adapter skeleton completed; no platform was integrated.")
     print("=" * 70)
     print()
     print("Key Points:")
@@ -148,10 +144,7 @@ def main():
     print("  3. Parse your API responses into Market objects")
     print("  4. Add to ArbitrageEngine like any other platform")
     print()
-    print("The arbitrage engine will automatically:")
-    print("  • Detect intra-platform opportunities on your platform")
-    print("  • Detect cross-platform opportunities with other platforms")
-    print("  • Apply your configured profit thresholds")
+    print("Any real adapter still requires independent API, contract, rules, and test review.")
 
 
 if __name__ == "__main__":

@@ -1,10 +1,10 @@
 """
-Scanner for single-event, multi-market arbitrage opportunities.
+Scanner for conditional single-event, multi-market basket candidates.
 
 This scanner looks for events that contain several binary markets representing
-mutually exclusive options plus a catch-all "other" option. When the YES prices
-for all such markets sum to less than 1, buying every YES guarantees a profit
-because at least one market must resolve to YES.
+mutually exclusive options plus a catch-all "other" option. It reports a
+model-implied edge only when the asserted outcome coverage and payoff assumptions
+produce a basket cost below one. It does not validate platform resolution rules.
 """
 
 import uuid
@@ -27,8 +27,8 @@ class SingleEventMultiMarketScanner(BaseScanner):
     Scans events for arbitrage across multiple markets within the same event.
 
     Focuses on events that include an "other/another" style option which makes
-    the set of markets exhaustive. The scanner buys YES on every market and
-    checks if the total cost is below the guaranteed payoff of 1.0.
+    the asserted set of markets exhaustive. The scanner models buying YES on
+    every market and compares ASK cost with a conditional payoff of 1.0.
     """
 
     def __init__(
@@ -38,12 +38,16 @@ class SingleEventMultiMarketScanner(BaseScanner):
         max_total_price_threshold: float = 0.98,
         price_type: PriceType = PriceType.ASK,
         other_keywords: Optional[List[str]] = None,
+        fee_rate_bps: float = 0.0,
+        slippage_bps: float = 0.0,
     ):
         super().__init__(
             price_accessor=price_accessor,
             min_profit_threshold=min_profit_threshold,
             max_total_price_threshold=max_total_price_threshold,
             price_type=price_type,
+            fee_rate_bps=fee_rate_bps,
+            slippage_bps=slippage_bps,
         )
         self.other_keywords = [
             "other",
@@ -72,6 +76,7 @@ class SingleEventMultiMarketScanner(BaseScanner):
         """
         start_time = datetime.utcnow()
         price_type = price_type or self.price_type
+        self.require_buy_price_type(price_type)
         opportunities: List[EnhancedOpportunity] = []
 
         event_groups = self._group_markets_by_event(markets)
@@ -157,9 +162,7 @@ class SingleEventMultiMarketScanner(BaseScanner):
             )
             if spread_data:
                 leg.spread_bps = spread_data.get("spread_bps")
-                leg.depth = spread_data.get("best_ask_size", 0) + spread_data.get(
-                    "best_bid_size", 0
-                )
+                leg.depth = spread_data.get("best_ask_size")
 
             legs.append(leg)
             total_cost += yes_price
@@ -175,31 +178,31 @@ class SingleEventMultiMarketScanner(BaseScanner):
             total_cost=total_cost,
             worst_case_payoff=1.0,
             best_case_payoff=1.0,
+            fee_rate_bps=self.fee_rate_bps,
+            slippage_bps=self.slippage_bps,
         )
 
-        if not self.is_opportunity_valid(metrics["profit_percentage"], total_cost):
+        if not self.is_opportunity_valid(
+            metrics["profit_percentage"], metrics["effective_cost"]
+        ):
             return None
 
-        adjusted_cost = self.apply_spread_adjustment(total_cost, legs)
+        adjusted_cost = self.apply_spread_adjustment(metrics["effective_cost"], legs)
         adjusted_profit = 1.0 - adjusted_cost
         adjusted_profit_pct = (
             (adjusted_profit / adjusted_cost * 100) if adjusted_cost > 0 else 0
         )
 
         liquidity_score = self.estimate_liquidity_score(legs)
-        max_size = (
-            min(leg.depth for leg in legs if leg.depth)
-            if any(leg.depth for leg in legs)
-            else None
-        )
+        max_size = self.get_max_size(legs)
 
         opportunity = EnhancedOpportunity(
             id=str(uuid.uuid4()),
             opportunity_class=OpportunityClass.SINGLE_EVENT_MULTI_MARKET,
-            name=f"Event coverage arb ({len(legs)} markets)",
+            name=f"Event coverage candidate ({len(legs)} markets)",
             description=(
-                "Buy YES across all markets in the event, including the "
-                "'other' option, for guaranteed coverage."
+                "ASK-cost model across every listed market, including an 'other' "
+                "option; coverage remains conditional on the platform's rules."
             ),
             legs=legs,
             total_cost=total_cost,
@@ -210,12 +213,12 @@ class SingleEventMultiMarketScanner(BaseScanner):
             adjusted_cost=adjusted_cost,
             adjusted_profit=adjusted_profit,
             adjusted_profit_percentage=adjusted_profit_pct,
-            risk_level=RiskLevel.LOW,
+            risk_level=RiskLevel.MEDIUM,
             max_size=max_size,
             liquidity_score=liquidity_score,
             market_ids=market_ids,
             event_ids=[event_id],
-            is_pure_arbitrage=True,
+            is_pure_arbitrage=False,
             tags=["multi_market_event", "other_option"],
         )
 

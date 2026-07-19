@@ -1,8 +1,4 @@
-"""
-Demo script showing polyarb functionality with mock data.
-
-This demonstrates the arbitrage detection without requiring API access.
-"""
+"""Deterministic offline scanner example using synthetic market snapshots only."""
 
 from polyarb import ArbitrageEngine
 from polyarb.platforms.base import Market
@@ -35,74 +31,74 @@ class DemoPlatform:
 def create_demo_data():
     """Create demo markets for demonstration."""
     
-    # Polymarket demo markets
-    polymarket_markets = [
+    venue_a_markets = [
         Market(
             id="poly_1",
-            platform="Polymarket",
+            platform="SyntheticVenueA",
             question="Will the next SpaceX launch be successful?",
             outcomes=["Yes", "No"],
-            prices={"Yes": 0.43, "No": 0.52},  # Total: 0.95 - Arbitrage opportunity!
+            prices={"Yes": 0.43, "No": 0.52},
             volume=50000.0
         ),
         Market(
             id="poly_2",
-            platform="Polymarket",
+            platform="SyntheticVenueA",
             question="Will it snow in NYC this weekend?",
             outcomes=["Yes", "No"],
-            prices={"Yes": 0.30, "No": 0.70},  # Total: 1.00 - No arbitrage
+            prices={"Yes": 0.30, "No": 0.70},
             volume=10000.0
         ),
         Market(
             id="poly_3",
-            platform="Polymarket",
+            platform="SyntheticVenueA",
             question="Will candidate X win the election?",
             outcomes=["Yes", "No"],
-            prices={"Yes": 0.60, "No": 0.38},  # Total: 0.98 - Small arbitrage
+            prices={"Yes": 0.60, "No": 0.38},
             volume=100000.0
         ),
     ]
     
-    # PredictIt demo markets (showing cross-platform opportunity)
-    predictit_markets = [
+    venue_b_markets = [
         Market(
             id="pred_1",
-            platform="PredictIt",
-            question="Will candidate X win the election?",  # Same as poly_3
+            platform="SyntheticVenueB",
+            question="Will candidate X win the election?",
             outcomes=["Yes", "No"],
-            prices={"Yes": 0.72, "No": 0.30},  # Yes is more expensive - arbitrage!
+            prices={"Yes": 0.72, "No": 0.30},
             volume=80000.0
         ),
     ]
     
-    return polymarket_markets, predictit_markets
+    return venue_a_markets, venue_b_markets
 
 
 def main():
     """Run the demo."""
     print("=" * 70)
-    print("Polyarb Demo - Arbitrage Detection with Mock Data")
+    print("Polyarb - deterministic synthetic opportunity scan")
     print("=" * 70)
     print()
     
     # Create demo platforms
-    polymarket_markets, predictit_markets = create_demo_data()
-    polymarket = DemoPlatform("Polymarket (Demo)", polymarket_markets)
-    predictit = DemoPlatform("PredictIt (Demo)", predictit_markets)
+    venue_a_markets, venue_b_markets = create_demo_data()
+    venue_a = DemoPlatform("SyntheticVenueA", venue_a_markets)
+    venue_b = DemoPlatform("SyntheticVenueB", venue_b_markets)
     
     print("Demo Platforms Initialized:")
-    print(f"  • {polymarket.platform_name}: {len(polymarket_markets)} markets")
-    print(f"  • {predictit.platform_name}: {len(predictit_markets)} markets")
+    print(f"  - {venue_a.platform_name}: {len(venue_a_markets)} markets")
+    print(f"  - {venue_b.platform_name}: {len(venue_b_markets)} markets")
     print()
     
     # Create arbitrage engine
     engine = ArbitrageEngine(
-        platforms=[polymarket, predictit],
-        min_profit_threshold=0.5,  # 0.5% minimum profit
-        max_total_price_threshold=0.99  # Allow up to 0.99 total for intra-platform
+        platforms=[venue_a, venue_b],
+        min_profit_threshold=0.5,
+        max_total_price_threshold=0.99,
+        fee_rate_bps=10.0,
+        slippage_bps=10.0,
     )
     
-    print("Analyzing markets for arbitrage opportunities...")
+    print("Scanning synthetic quotes under explicit 10 bps fee + 10 bps slippage assumptions...")
     print("-" * 70)
     print()
     
@@ -110,10 +106,10 @@ def main():
     opportunities = engine.find_opportunities()
     
     if not opportunities:
-        print("No arbitrage opportunities found.")
+        print("No model-implied candidates found.")
         return
     
-    print(f"Found {len(opportunities)} arbitrage opportunity(ies):\n")
+    print(f"Found {len(opportunities)} model-implied candidate(s):\n")
     
     # Display opportunities
     for i, opp in enumerate(opportunities, 1):
@@ -122,23 +118,24 @@ def main():
         print(f"{'#' * 70}")
         print()
         print(f"Platform(s):      {', '.join(opp.platforms)}")
-        print(f"Expected Profit:  {opp.profit_percentage:.2f}%")
-        print(f"Confidence:       {opp.confidence:.0%}")
+        print(f"Modeled edge:     {opp.profit_percentage:.2f}%")
         print(f"Description:      {opp.description}")
         print()
         print(f"Strategy:         {opp.strategy.get('action', 'N/A')}")
         
         if opp.opportunity_type == OpportunityType.INTRA_PLATFORM:
             print()
-            print("Positions to take:")
+            print("Modeled basket:")
             for outcome, price in opp.strategy.get("positions", {}).items():
-                print(f"  • Buy {outcome}: ${price:.4f}")
+                print(f"  - Buy {outcome}: ${price:.4f}")
             
             print()
-            print(f"Total Investment:    ${opp.strategy.get('total_cost', 0):.4f}")
-            print(f"Guaranteed Return:   ${opp.strategy.get('guaranteed_return', 0):.4f}")
-            print(f"Net Profit:          ${opp.strategy.get('net_profit', 0):.4f}")
-            print(f"ROI:                 {opp.profit_percentage:.2f}%")
+            print(f"Quoted basket cost:  ${opp.strategy.get('total_cost', 0):.4f}")
+            print(
+                "Cost after assumptions: "
+                f"${opp.strategy.get('modeled_cost_after_fees_and_slippage', 0):.4f}"
+            )
+            print(f"Model-implied edge:  ${opp.strategy.get('model_implied_edge', 0):.4f}")
         
         elif opp.opportunity_type == OpportunityType.CROSS_PLATFORM:
             print()
@@ -152,7 +149,7 @@ def main():
             print(f"Buy on:               {buy_platform} at ${buy_price:.4f}")
             print(f"Sell on:              {sell_platform} at ${sell_price:.4f}")
             print(f"Price Difference:     ${opp.strategy.get('price_difference', 0):.4f}")
-            print(f"Profit per share:     {opp.profit_percentage:.2f}%")
+            print(f"Model-implied edge:   {opp.profit_percentage:.2f}%")
         
         print()
     
@@ -160,10 +157,10 @@ def main():
     print("Demo Complete!")
     print("=" * 70)
     print()
-    print("Key Insights:")
-    print("  • Intra-platform arbitrage: Buy all outcomes when sum < 1")
-    print("  • Cross-platform arbitrage: Buy low on one platform, sell high on another")
-    print("  • Always consider transaction fees and execution risk in real trading")
+    print("Boundaries:")
+    print("  - Inputs are deterministic synthetic quotes, not market or account data.")
+    print("  - Results are detected candidates, not approved, submitted, filled, or settled trades.")
+    print("  - Contract equivalence, rules, liquidity, fees, and execution require independent review.")
 
 
 if __name__ == "__main__":

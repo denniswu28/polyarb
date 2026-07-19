@@ -1,8 +1,7 @@
-"""
-Polyarb - Arbitrage machine for prediction markets.
+"""Prediction-market research scanning with deterministic simulated execution.
 
-This package provides tools for detecting and executing arbitrage opportunities
-across prediction market platforms including Polymarket, PredictIt, and Kalshi.
+Polymarket data/scanning paths are the only platform-specific paths reported as
+owner-validated. PredictIt, Kalshi, and live order submission fail closed.
 """
 
 __version__ = "0.1.0"

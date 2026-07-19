@@ -13,7 +13,7 @@ import inspect
 import httpx
 import asyncio
 
-from polyarb.data.models import OrderBookSnapshot, PriceType
+from polyarb.data.models import OrderBookSnapshot
 
 
 class CLOBClient:
@@ -35,7 +35,7 @@ class CLOBClient:
         Initialize CLOB API client.
         
         Args:
-            base_url: Base URL for CLOB API (defaults to production)
+            base_url: Base URL for the public CLOB data API
             timeout: Request timeout in seconds
             max_retries: Maximum number of retries for failed requests
         """
@@ -153,8 +153,10 @@ class CLOBClient:
         if not bids or not asks:
             return None
         
-        best_bid = float(bids[0]["price"])
-        best_ask = float(asks[0]["price"])
+        best_bid_level = max(bids, key=lambda level: float(level["price"]))
+        best_ask_level = min(asks, key=lambda level: float(level["price"]))
+        best_bid = float(best_bid_level["price"])
+        best_ask = float(best_ask_level["price"])
         
         if best_bid <= 0 or best_ask <= 0:
             return None
@@ -168,7 +170,9 @@ class CLOBClient:
             "best_ask": best_ask,
             "spread": spread,
             "spread_bps": spread_bps,
-            "mid_price": mid_price
+            "mid_price": mid_price,
+            "best_bid_size": float(best_bid_level["size"]),
+            "best_ask_size": float(best_ask_level["size"]),
         }
     
     def parse_orderbook_snapshot(
@@ -193,14 +197,16 @@ class CLOBClient:
         best_bid = None
         best_bid_size = None
         if bids:
-            best_bid = Decimal(str(bids[0]["price"]))
-            best_bid_size = Decimal(str(bids[0]["size"]))
+            best_bid_level = max(bids, key=lambda level: Decimal(str(level["price"])))
+            best_bid = Decimal(str(best_bid_level["price"]))
+            best_bid_size = Decimal(str(best_bid_level["size"]))
         
         best_ask = None
         best_ask_size = None
         if asks:
-            best_ask = Decimal(str(asks[0]["price"]))
-            best_ask_size = Decimal(str(asks[0]["size"]))
+            best_ask_level = min(asks, key=lambda level: Decimal(str(level["price"])))
+            best_ask = Decimal(str(best_ask_level["price"]))
+            best_ask_size = Decimal(str(best_ask_level["size"]))
         
         # Calculate mid price and spread
         mid_price = None
@@ -307,10 +313,16 @@ class CLOBClient:
 
             return normalized_levels
 
-        return {
-            "bids": _normalize_levels(bids),
-            "asks": _normalize_levels(asks)
-        }
+        normalized_bids = sorted(
+            _normalize_levels(bids),
+            key=lambda level: float(level["price"]),
+            reverse=True,
+        )
+        normalized_asks = sorted(
+            _normalize_levels(asks),
+            key=lambda level: float(level["price"]),
+        )
+        return {"bids": normalized_bids, "asks": normalized_asks}
 
     def _init_py_clob_client(self, kwargs: Dict[str, Any]):
         """Attempt to initialize py-clob-client if available."""

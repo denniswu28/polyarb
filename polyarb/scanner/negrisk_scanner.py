@@ -20,8 +20,9 @@ class NegRiskScanner(BaseScanner):
     """
     Scans for within-market rebalancing opportunities in NegRisk markets.
     
-    NegRisk markets have mutually exclusive and exhaustive outcomes.
-    When sum of YES prices < 1, buying all YES positions guarantees profit.
+    The calculation assumes the supplied outcomes are mutually exclusive and
+    exhaustive under compatible rules. An ASK basket below its modeled payoff
+    is a candidate edge, not a guaranteed result.
     """
     
     async def scan(
@@ -43,6 +44,7 @@ class NegRiskScanner(BaseScanner):
         """
         start_time = datetime.utcnow()
         price_type = price_type or self.price_type
+        self.require_buy_price_type(price_type)
         opportunities = []
         
         # Group markets by neg_risk_id
@@ -164,24 +166,28 @@ class NegRiskScanner(BaseScanner):
         if total_cost >= self.max_total_price_threshold:
             return None
         
-        # Calculate profit metrics
+        # Calculate model-implied edge using backward-compatible field names.
         metrics = self.calculate_profit_metrics(
             total_cost=total_cost,
-            worst_case_payoff=1.0,  # Exactly one outcome resolves TRUE
-            best_case_payoff=1.0
+            worst_case_payoff=1.0,  # Modeled only if exactly one outcome resolves true.
+            best_case_payoff=1.0,
+            fee_rate_bps=self.fee_rate_bps,
+            slippage_bps=self.slippage_bps,
         )
         
-        if not self.is_opportunity_valid(metrics["profit_percentage"], total_cost):
+        if not self.is_opportunity_valid(
+            metrics["profit_percentage"], metrics["effective_cost"]
+        ):
             return None
         
         # Apply spread adjustment
-        adjusted_cost = self.apply_spread_adjustment(total_cost, legs)
+        adjusted_cost = self.apply_spread_adjustment(metrics["effective_cost"], legs)
         adjusted_profit = 1.0 - adjusted_cost
         adjusted_profit_pct = (adjusted_profit / adjusted_cost * 100) if adjusted_cost > 0 else 0
         
         # Estimate liquidity
         liquidity_score = self.estimate_liquidity_score(legs)
-        max_size = min(leg.depth for leg in legs if leg.depth) if any(leg.depth for leg in legs) else None
+        max_size = self.get_max_size(legs)
         
         # Get event IDs
         event_ids = list(set(m.get("event_id") for m in markets if m.get("event_id")))
@@ -193,8 +199,8 @@ class NegRiskScanner(BaseScanner):
             opportunity_class=OpportunityClass.NEGRISK_REBALANCING,
             name=f"NegRisk Rebalancing: {len(legs)} outcomes",
             description=(
-                f"Buy YES on all {len(legs)} mutually exclusive outcomes "
-                f"for guaranteed profit. Total cost: {total_cost:.4f}"
+                f"ASK-cost model across {len(legs)} asserted mutually exclusive and "
+                f"exhaustive outcomes. Total quoted cost: {total_cost:.4f}."
             ),
             legs=legs,
             total_cost=total_cost,
@@ -205,12 +211,12 @@ class NegRiskScanner(BaseScanner):
             adjusted_cost=adjusted_cost,
             adjusted_profit=adjusted_profit,
             adjusted_profit_percentage=adjusted_profit_pct,
-            risk_level=RiskLevel.LOW,
+            risk_level=RiskLevel.MEDIUM,
             max_size=max_size,
             liquidity_score=liquidity_score,
             market_ids=market_ids,
             event_ids=event_ids,
-            is_pure_arbitrage=True,
+            is_pure_arbitrage=False,
             tags=["negrisk", f"neg_risk_id:{neg_risk_id}"],
         )
         

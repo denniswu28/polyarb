@@ -1,12 +1,6 @@
-"""
-Arbitrage detection engine.
-
-This module provides the core arbitrage detection logic for finding opportunities
-within and across prediction market platforms.
-"""
+"""Research engine for model-implied prediction-market candidates."""
 
 from typing import List, Dict, Optional, Set
-from itertools import combinations
 
 from polyarb.platforms.base import PlatformInterface, Market
 from polyarb.core.opportunity import ArbitrageOpportunity, OpportunityType
@@ -14,26 +8,38 @@ from polyarb.core.opportunity import ArbitrageOpportunity, OpportunityType
 
 class ArbitrageEngine:
     """
-    Engine for detecting arbitrage opportunities across prediction markets.
+    Engine for detecting basket and quote-discrepancy research candidates.
     """
     
     def __init__(
         self,
         platforms: Optional[List[PlatformInterface]] = None,
         min_profit_threshold: float = 1.0,
-        max_total_price_threshold: float = 0.98
+        max_total_price_threshold: float = 0.98,
+        fee_rate_bps: float = 0.0,
+        slippage_bps: float = 0.0,
     ):
         """
         Initialize the arbitrage engine.
         
         Args:
             platforms: List of platform interfaces to monitor
-            min_profit_threshold: Minimum profit percentage to report (default 1%)
-            max_total_price_threshold: Maximum total price for intra-platform arb (default 0.98)
+            min_profit_threshold: Minimum model-edge percentage to report (default 1%)
+            max_total_price_threshold: Maximum conditional basket cost (default 0.98)
+            fee_rate_bps: Explicit fee assumption applied to modeled transaction value
+            slippage_bps: Explicit slippage assumption applied to modeled transaction value
         """
+        if fee_rate_bps < 0 or slippage_bps < 0:
+            raise ValueError("fee_rate_bps and slippage_bps must be non-negative")
         self.platforms = platforms or []
         self.min_profit_threshold = min_profit_threshold
         self.max_total_price_threshold = max_total_price_threshold
+        self.fee_rate_bps = fee_rate_bps
+        self.slippage_bps = slippage_bps
+
+    def _cost_adjustment(self, transaction_value: float) -> float:
+        """Return configured fees and slippage for a modeled transaction value."""
+        return transaction_value * (self.fee_rate_bps + self.slippage_bps) / 10000
     
     def add_platform(self, platform: PlatformInterface) -> None:
         """Add a platform to monitor."""
@@ -47,7 +53,7 @@ class ArbitrageEngine:
     
     def find_opportunities(self) -> List[ArbitrageOpportunity]:
         """
-        Find all arbitrage opportunities across registered platforms.
+        Find all research candidates across registered platforms.
         
         Returns:
             List of ArbitrageOpportunity objects
@@ -64,7 +70,7 @@ class ArbitrageEngine:
             cross_opps = self.find_cross_platform_opportunities()
             opportunities.extend(cross_opps)
         
-        # Filter by profit threshold
+        # Filter by the backward-compatible model-edge threshold.
         opportunities = [
             opp for opp in opportunities 
             if opp.is_profitable(self.min_profit_threshold)
@@ -77,16 +83,16 @@ class ArbitrageEngine:
         platform: PlatformInterface
     ) -> List[ArbitrageOpportunity]:
         """
-        Find arbitrage opportunities within a single platform.
+        Find conditional basket candidates within a single platform.
         
         This looks for markets where the sum of outcome prices is less than 1,
-        allowing for risk-free profit by buying all outcomes.
+        under a conditional payoff assumption that must be reviewed separately.
         
         Args:
             platform: Platform to analyze
             
         Returns:
-            List of intra-platform arbitrage opportunities
+            List of intra-platform research candidates
         """
         opportunities = []
 
@@ -103,9 +109,13 @@ class ArbitrageEngine:
             if total_price <= 0:
                 continue
 
-            # If total price < 1, there's an arbitrage opportunity
-            if total_price < self.max_total_price_threshold:
-                profit_percentage = ((1 - total_price) / total_price) * 100
+            effective_total_price = total_price + self._cost_adjustment(total_price)
+
+            # The model reports a candidate only after explicit cost assumptions.
+            if effective_total_price < self.max_total_price_threshold:
+                profit_percentage = (
+                    (1 - effective_total_price) / effective_total_price
+                ) * 100
 
                 # Calculate optimal positions
                 strategy = {
@@ -115,8 +125,12 @@ class ArbitrageEngine:
                         for outcome, price in market.prices.items()
                     },
                     "total_cost": total_price,
-                    "guaranteed_return": 1.0,
-                    "net_profit": 1.0 - total_price
+                    "modeled_cost_after_fees_and_slippage": effective_total_price,
+                    "fee_rate_bps": self.fee_rate_bps,
+                    "slippage_bps": self.slippage_bps,
+                    "modeled_payoff": 1.0,
+                    "payoff_assumption_is_conditional": True,
+                    "model_implied_edge": 1.0 - effective_total_price,
                 }
 
                 opportunity = ArbitrageOpportunity(
@@ -125,11 +139,12 @@ class ArbitrageEngine:
                     platforms=[platform.platform_name],
                     description=(
                         f"Buy all outcomes in '{market.question}' "
-                        f"for total cost {total_price:.4f}"
+                        f"for quoted cost {total_price:.4f}; model-implied payoff "
+                        "coverage requires contract and resolution review"
                     ),
                     profit_percentage=profit_percentage,
                     strategy=strategy,
-                    confidence=0.95 if total_price < 0.95 else 0.85
+                    confidence=0.0,
                 )
 
                 opportunities.append(opportunity)
@@ -138,12 +153,12 @@ class ArbitrageEngine:
     
     def find_cross_platform_opportunities(self) -> List[ArbitrageOpportunity]:
         """
-        Find arbitrage opportunities across multiple platforms.
+        Find cross-platform quote-discrepancy candidates.
         
         This looks for the same market on different platforms with price discrepancies.
         
         Returns:
-            List of cross-platform arbitrage opportunities
+            List of cross-platform research candidates
         """
         opportunities = []
 
@@ -155,7 +170,7 @@ class ArbitrageEngine:
         # Find matching markets across platforms
         matched_markets = self._match_markets_across_platforms(platform_markets)
 
-        # Analyze each matched market group for arbitrage
+        # Analyze each asserted matching group for quote discrepancies.
         for market_group in matched_markets:
             cross_opps = self._analyze_cross_platform_market_group(market_group)
             opportunities.extend(cross_opps)
@@ -178,7 +193,7 @@ class ArbitrageEngine:
         matched_groups = []
         
         # Simple matching based on question similarity
-        # In production, this would use more sophisticated matching
+        # This heuristic does not establish contract equivalence.
         platform_names = list(platform_markets.keys())
         
         for i, platform1 in enumerate(platform_names):
@@ -225,13 +240,13 @@ class ArbitrageEngine:
         markets: List[Market]
     ) -> List[ArbitrageOpportunity]:
         """
-        Analyze a group of matched markets for cross-platform arbitrage.
+        Analyze a group of asserted matches for quote discrepancies.
         
         Args:
             markets: List of matching markets from different platforms
             
         Returns:
-            List of arbitrage opportunities found
+            List of research candidates found
         """
         opportunities = []
         
@@ -242,7 +257,7 @@ class ArbitrageEngine:
         # Find common outcomes
         common_outcomes = self._find_common_outcomes(markets)
         
-        for outcome in common_outcomes:
+        for outcome in sorted(common_outcomes):
             prices = []
             for market in markets:
                 price = market.get_price(outcome)
@@ -255,13 +270,15 @@ class ArbitrageEngine:
                 lowest_price_market, lowest_price = prices[0]
                 highest_price_market, highest_price = prices[-1]
                 
-                # Calculate potential profit
+                # Calculate the modeled quote discrepancy after explicit costs.
                 price_diff = highest_price - lowest_price
                 if lowest_price <= 0:
                     continue
 
-                if price_diff > 0.01:  # Minimum 1 cent difference
-                    profit_percentage = (price_diff / lowest_price) * 100
+                modeled_costs = self._cost_adjustment(lowest_price + highest_price)
+                modeled_edge = price_diff - modeled_costs
+                if modeled_edge > 0.01:  # Minimum modeled 1 cent discrepancy
+                    profit_percentage = (modeled_edge / lowest_price) * 100
                     
                     strategy = {
                         "action": "buy_low_sell_high",
@@ -270,7 +287,10 @@ class ArbitrageEngine:
                         "sell_platform": highest_price_market.platform,
                         "sell_price": highest_price,
                         "outcome": outcome,
-                        "price_difference": price_diff
+                        "price_difference": price_diff,
+                        "model_implied_edge": modeled_edge,
+                        "fee_rate_bps": self.fee_rate_bps,
+                        "slippage_bps": self.slippage_bps,
                     }
                     
                     opportunity = ArbitrageOpportunity(
@@ -280,11 +300,12 @@ class ArbitrageEngine:
                         description=(
                             f"Buy '{outcome}' at {lowest_price:.4f} on "
                             f"{lowest_price_market.platform}, sell at {highest_price:.4f} "
-                            f"on {highest_price_market.platform}"
+                            f"on {highest_price_market.platform}; candidate requires "
+                            "contract-equivalence, rules, and executable-hedge review"
                         ),
                         profit_percentage=profit_percentage,
                         strategy=strategy,
-                        confidence=0.80  # Lower confidence due to execution risk
+                        confidence=0.0,
                     )
                     
                     opportunities.append(opportunity)

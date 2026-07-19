@@ -1,275 +1,331 @@
-"""
-Basket execution for multi-leg arbitrage opportunities.
-"""
+"""Deterministic simulated basket execution with live submission disabled."""
 
-from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from decimal import Decimal
+from typing import List, Optional, Sequence
 
+from polyarb.core.lifecycle import LifecycleState
 from polyarb.scanner.enhanced_opportunity import EnhancedOpportunity, Leg
-from polyarb.data.models import Trade
+
+
+class ExecutionMode(str, Enum):
+    """Execution modes exposed by the framework."""
+
+    SIMULATED = "simulated"
+    LIVE = "live"
 
 
 class ExecutionStatus(str, Enum):
-    """Status of execution."""
+    """Execution and fill statuses; these states are intentionally distinct."""
+
     PENDING = "pending"
+    SIMULATED = "simulated"
+    SUBMITTED = "submitted"
+    FILLED = "filled"
+    PARTIALLY_FILLED = "partially_filled"
+    CANCELLED = "cancelled"
+    SETTLED = "settled"
+    REPORTED = "reported"
+    FAILED = "failed"
+
+    # Backward-compatible legacy members. New code should use the explicit states above.
     PARTIAL = "partial"
     COMPLETED = "completed"
-    FAILED = "failed"
     ABORTED = "aborted"
+
+
+class LiveExecutionDisabledError(RuntimeError):
+    """Raised before any live-order path can submit an order."""
+
+
+class OpportunityNotApprovedError(RuntimeError):
+    """Raised when simulation is requested before an opportunity is approved."""
 
 
 @dataclass
 class LegExecution:
-    """Execution result for a single leg."""
-    
+    """Fill result for one leg; simulated fills never contain an order ID."""
+
     leg: Leg
     status: ExecutionStatus
+    requested_size: float = 0.0
     filled_size: float = 0.0
     avg_fill_price: Optional[float] = None
     slippage_bps: Optional[float] = None
     order_ids: List[str] = field(default_factory=list)
     error_message: Optional[str] = None
+    is_simulated: bool = True
     timestamp: datetime = field(default_factory=datetime.utcnow)
 
 
 @dataclass
 class ExecutionResult:
-    """Result of basket execution."""
-    
+    """Basket result with simulation, fill, settlement, and report states separated."""
+
     opportunity_id: str
     status: ExecutionStatus
+    execution_mode: ExecutionMode = ExecutionMode.SIMULATED
+    lifecycle_state: LifecycleState = LifecycleState.SIMULATED
+    fill_status: Optional[ExecutionStatus] = None
     leg_executions: List[LegExecution] = field(default_factory=list)
-    
+
     total_cost: float = 0.0
+    simulated_cost: float = 0.0
+    simulated_slippage_bps: float = 0.0
     actual_cost: float = 0.0
     realized_slippage: float = 0.0
-    
+    settled_payout: Optional[float] = None
+
     started_at: datetime = field(default_factory=datetime.utcnow)
     completed_at: Optional[datetime] = None
-    
+    reported_at: Optional[datetime] = None
     notes: List[str] = field(default_factory=list)
-    
+
     def get_fill_rate(self) -> float:
-        """Get overall fill rate (0-1)."""
-        if not self.leg_executions:
+        """Return filled size divided by requested size across all simulated legs."""
+        requested = sum(leg.requested_size for leg in self.leg_executions)
+        if requested <= 0:
             return 0.0
-        
-        filled = sum(1 for le in self.leg_executions if le.status == ExecutionStatus.COMPLETED)
-        return filled / len(self.leg_executions)
-    
+        return sum(leg.filled_size for leg in self.leg_executions) / requested
+
+    def is_simulated(self) -> bool:
+        """Return whether this record describes a simulation."""
+        return self.lifecycle_state == LifecycleState.SIMULATED
+
+    def is_filled(self) -> bool:
+        """Return whether a real submitted basket is recorded as fully filled."""
+        return (
+            self.execution_mode == ExecutionMode.LIVE
+            and self.lifecycle_state in {LifecycleState.FILLED, LifecycleState.SETTLED}
+        )
+
+    def is_settled(self) -> bool:
+        """Return whether a real fill has a recorded settlement."""
+        return (
+            self.execution_mode == ExecutionMode.LIVE
+            and self.lifecycle_state == LifecycleState.SETTLED
+        )
+
     def is_complete(self) -> bool:
-        """Check if all legs are filled."""
-        return self.status == ExecutionStatus.COMPLETED
-    
+        """Backward-compatible alias for a real filled or settled result."""
+        return self.is_filled()
+
     def get_failed_legs(self) -> List[LegExecution]:
-        """Get legs that failed to execute."""
-        return [le for le in self.leg_executions if le.status == ExecutionStatus.FAILED]
+        """Return failed or cancelled legs."""
+        return [
+            leg
+            for leg in self.leg_executions
+            if leg.status in {ExecutionStatus.FAILED, ExecutionStatus.CANCELLED}
+        ]
+
+    def mark_reported(self) -> None:
+        """Record reporting without changing fill or settlement evidence."""
+        self.reported_at = datetime.utcnow()
 
 
 class BasketExecutor:
-    """
-    Executes multi-leg arbitrage baskets with non-atomic fill handling.
-    
-    Note: This is a framework class. In production, you would integrate
-    with actual trading APIs (Polymarket CLOB, order placement, etc.).
-    """
-    
+    """Run deterministic paper simulations; live order submission is unavailable."""
+
     def __init__(
         self,
-        max_slippage_bps: float = 50,  # 0.5%
-        min_fill_rate: float = 0.8,  # 80% of legs must fill
-        execution_timeout: int = 60,  # seconds
+        max_slippage_bps: float = 50,
+        min_fill_rate: float = 0.8,
+        execution_timeout: int = 60,
+        execution_mode: ExecutionMode = ExecutionMode.SIMULATED,
     ):
-        """
-        Initialize basket executor.
-        
-        Args:
-            max_slippage_bps: Maximum acceptable slippage in basis points
-            min_fill_rate: Minimum fill rate to consider execution successful
-            execution_timeout: Timeout for execution in seconds
-        """
+        if max_slippage_bps < 0:
+            raise ValueError("max_slippage_bps must be non-negative")
+        if not 0 <= min_fill_rate <= 1:
+            raise ValueError("min_fill_rate must be between 0 and 1")
+
         self.max_slippage_bps = max_slippage_bps
         self.min_fill_rate = min_fill_rate
         self.execution_timeout = execution_timeout
-    
+        self.execution_mode = ExecutionMode(execution_mode)
+
     async def execute_opportunity(
         self,
         opportunity: EnhancedOpportunity,
         target_size: float = 1.0,
-        aggressive: bool = False
+        aggressive: bool = False,
+        simulation_fill_ratios: Optional[Sequence[float]] = None,
+        simulation_slippage_bps: Optional[Sequence[float]] = None,
     ) -> ExecutionResult:
-        """
-        Execute an arbitrage opportunity.
-        
-        Args:
-            opportunity: Opportunity to execute
-            target_size: Target notional size per leg
-            aggressive: Whether to cross the spread aggressively
-            
-        Returns:
-            ExecutionResult
-        """
+        """Simulate an approved opportunity without creating or submitting orders."""
+        if self.execution_mode != ExecutionMode.SIMULATED:
+            raise LiveExecutionDisabledError(
+                "Live order submission is disabled and not implemented in polyarb."
+            )
+        if opportunity.lifecycle_state != LifecycleState.APPROVED:
+            raise OpportunityNotApprovedError(
+                "Opportunity must be explicitly approved before simulated execution."
+            )
+        if target_size <= 0:
+            raise ValueError("target_size must be positive")
+        if opportunity.max_size is not None and target_size > opportunity.max_size:
+            raise ValueError("target_size exceeds the opportunity liquidity constraint")
+
+        fill_ratios = self._validated_inputs(
+            simulation_fill_ratios,
+            len(opportunity.legs),
+            default=1.0,
+            lower=0.0,
+            upper=1.0,
+            name="simulation_fill_ratios",
+        )
+        default_slippage = 10.0 if aggressive else 5.0
+        slippage_values = self._validated_inputs(
+            simulation_slippage_bps,
+            len(opportunity.legs),
+            default=default_slippage,
+            lower=0.0,
+            upper=None,
+            name="simulation_slippage_bps",
+        )
+
         result = ExecutionResult(
             opportunity_id=opportunity.id,
-            status=ExecutionStatus.PENDING,
-            total_cost=opportunity.total_cost * target_size
+            status=ExecutionStatus.SIMULATED,
+            total_cost=opportunity.total_cost * target_size,
+            notes=["Paper simulation only; no order was created or submitted."],
         )
-        
-        # Execute each leg
-        for leg in opportunity.legs:
-            leg_result = await self._execute_leg(
-                leg, 
-                target_size,
-                aggressive,
-                opportunity
+
+        for leg, fill_ratio, slippage_bps in zip(
+            opportunity.legs, fill_ratios, slippage_values
+        ):
+            result.leg_executions.append(
+                await self._execute_leg(
+                    leg,
+                    target_size,
+                    aggressive,
+                    opportunity,
+                    fill_ratio=fill_ratio,
+                    slippage_bps=slippage_bps,
+                )
             )
-            result.leg_executions.append(leg_result)
-            
-            # Check if we should abort
-            if leg_result.status == ExecutionStatus.FAILED:
-                if not self._should_continue_after_failure(result):
-                    result.status = ExecutionStatus.ABORTED
-                    result.notes.append(f"Aborted after leg {leg.outcome_label} failed")
-                    break
-        
-        # Finalize result
+
         result.completed_at = datetime.utcnow()
-        
-        # Calculate actual metrics
-        result.actual_cost = sum(
-            le.avg_fill_price * le.filled_size 
-            for le in result.leg_executions 
-            if le.avg_fill_price
+        result.simulated_cost = sum(
+            leg.avg_fill_price * leg.filled_size
+            for leg in result.leg_executions
+            if leg.avg_fill_price is not None
         )
-        
-        if result.total_cost > 0:
-            result.realized_slippage = ((result.actual_cost - result.total_cost) / 
-                                       result.total_cost * 10000)
-        
-        # Determine final status
+        expected_cost_of_filled_size = sum(
+            leg.leg.price * leg.filled_size for leg in result.leg_executions
+        )
+        if expected_cost_of_filled_size > 0:
+            result.simulated_slippage_bps = (
+                (result.simulated_cost - expected_cost_of_filled_size)
+                / expected_cost_of_filled_size
+                * 10000
+            )
+
         fill_rate = result.get_fill_rate()
-        if fill_rate >= self.min_fill_rate:
-            result.status = ExecutionStatus.COMPLETED
+        if fill_rate == 1.0:
+            result.fill_status = ExecutionStatus.FILLED
         elif fill_rate > 0:
-            result.status = ExecutionStatus.PARTIAL
+            result.fill_status = ExecutionStatus.PARTIALLY_FILLED
         else:
-            result.status = ExecutionStatus.FAILED
-        
+            result.fill_status = ExecutionStatus.CANCELLED
+
+        if fill_rate < self.min_fill_rate:
+            result.notes.append(
+                f"Simulated fill rate {fill_rate:.1%} is below the configured "
+                f"minimum {self.min_fill_rate:.1%}."
+            )
         return result
-    
+
+    async def submit_live_order(self, *args, **kwargs):
+        """Fail closed before credentials, wallets, or network clients are consulted."""
+        raise LiveExecutionDisabledError(
+            "Live order submission is disabled and not implemented in polyarb."
+        )
+
     async def _execute_leg(
         self,
         leg: Leg,
         size: float,
         aggressive: bool,
-        opportunity: EnhancedOpportunity
+        opportunity: EnhancedOpportunity,
+        fill_ratio: float = 1.0,
+        slippage_bps: Optional[float] = None,
     ) -> LegExecution:
-        """
-        Execute a single leg.
-        
-        This is a placeholder for actual order execution logic.
-        
-        Args:
-            leg: Leg to execute
-            size: Size to execute
-            aggressive: Whether to cross spread
-            opportunity: Parent opportunity
-            
-        Returns:
-            LegExecution
-        """
-        leg_exec = LegExecution(
-            leg=leg,
-            status=ExecutionStatus.PENDING
+        """Create one deterministic simulated leg result."""
+        del aggressive, opportunity
+        applied_slippage = 5.0 if slippage_bps is None else slippage_bps
+        if fill_ratio == 0 or applied_slippage > self.max_slippage_bps:
+            reason = (
+                "simulated no-fill"
+                if fill_ratio == 0
+                else "simulated slippage exceeded configured limit"
+            )
+            return LegExecution(
+                leg=leg,
+                status=ExecutionStatus.CANCELLED,
+                requested_size=size,
+                slippage_bps=applied_slippage,
+                error_message=reason,
+            )
+
+        filled_size = size * fill_ratio
+        actual_price = leg.price * (1 + applied_slippage / 10000)
+        status = (
+            ExecutionStatus.FILLED
+            if fill_ratio == 1.0
+            else ExecutionStatus.PARTIALLY_FILLED
         )
-        
-        try:
-            # In production, this would:
-            # 1. Place limit or market order via CLOB API
-            # 2. Monitor fills
-            # 3. Handle partial fills
-            # 4. Calculate slippage
-            
-            # Placeholder: simulate execution
-            # Assume successful fill at expected price + slippage
-            expected_price = leg.price
-            slippage_factor = 0.001 if aggressive else 0.0005  # 0.1% or 0.05%
-            actual_price = expected_price * (1 + slippage_factor)
-            
-            leg_exec.status = ExecutionStatus.COMPLETED
-            leg_exec.filled_size = size
-            leg_exec.avg_fill_price = actual_price
-            leg_exec.slippage_bps = (actual_price - expected_price) / expected_price * 10000
-            leg_exec.order_ids = ["simulated_order_id"]
-            
-        except Exception as e:
-            leg_exec.status = ExecutionStatus.FAILED
-            leg_exec.error_message = str(e)
-        
-        return leg_exec
-    
+        return LegExecution(
+            leg=leg,
+            status=status,
+            requested_size=size,
+            filled_size=filled_size,
+            avg_fill_price=actual_price,
+            slippage_bps=applied_slippage,
+            order_ids=[],
+        )
+
+    @staticmethod
+    def _validated_inputs(
+        values: Optional[Sequence[float]],
+        count: int,
+        *,
+        default: float,
+        lower: float,
+        upper: Optional[float],
+        name: str,
+    ) -> List[float]:
+        if values is None:
+            return [default] * count
+        if len(values) != count:
+            raise ValueError(f"{name} must contain one value per opportunity leg")
+        normalized = [float(value) for value in values]
+        if any(value < lower or (upper is not None and value > upper) for value in normalized):
+            bound = f"[{lower}, {upper}]" if upper is not None else f">= {lower}"
+            raise ValueError(f"{name} values must be within {bound}")
+        return normalized
+
     def _should_continue_after_failure(self, result: ExecutionResult) -> bool:
-        """
-        Decide whether to continue execution after a leg failure.
-        
-        Args:
-            result: Current execution result
-            
-        Returns:
-            True if should continue
-        """
-        # Check current fill rate
-        if len(result.leg_executions) == 0:
-            return True
-        
-        filled = sum(1 for le in result.leg_executions if le.status == ExecutionStatus.COMPLETED)
-        total = len(result.leg_executions)
-        
-        # If we're below min fill rate and have few legs left, abort
-        if filled / (total + 1) < self.min_fill_rate:
-            return False
-        
-        return True
-    
+        """Retained for callers of the legacy helper; simulations evaluate every leg."""
+        return result.get_fill_rate() >= self.min_fill_rate
+
     async def recompute_opportunity_edge(
         self,
         opportunity: EnhancedOpportunity,
-        executed_legs: List[LegExecution]
+        executed_legs: List[LegExecution],
     ) -> float:
-        """
-        Recompute remaining edge after partial fills.
-        
-        Args:
-            opportunity: Original opportunity
-            executed_legs: Legs that have been executed
-            
-        Returns:
-            Remaining profit percentage
-        """
-        executed_token_ids = {le.leg.token_id for le in executed_legs}
-        
-        # Cost of executed legs
+        """Recompute the model-implied remaining edge after simulated fills."""
+        executed_token_ids = {
+            leg.leg.token_id for leg in executed_legs if leg.filled_size > 0
+        }
         executed_cost = sum(
-            le.avg_fill_price * le.filled_size 
-            for le in executed_legs 
-            if le.avg_fill_price
+            leg.avg_fill_price * leg.filled_size
+            for leg in executed_legs
+            if leg.avg_fill_price is not None
         )
-        
-        # Estimated cost of remaining legs
         remaining_cost = sum(
-            leg.price 
-            for leg in opportunity.legs 
-            if leg.token_id not in executed_token_ids
+            leg.price for leg in opportunity.legs if leg.token_id not in executed_token_ids
         )
-        
         total_cost = executed_cost + remaining_cost
-        
-        # Recalculate edge
-        expected_payoff = opportunity.worst_case_payoff
-        profit = expected_payoff - total_cost
-        profit_pct = (profit / total_cost * 100) if total_cost > 0 else 0
-        
-        return profit_pct
+        model_edge = opportunity.worst_case_payoff - total_cost
+        return (model_edge / total_cost * 100) if total_cost > 0 else 0.0

@@ -2,7 +2,6 @@
 Tests for the arbitrage engine core functionality.
 """
 
-import pytest
 from polyarb.core.arbitrage_engine import ArbitrageEngine
 from polyarb.core.opportunity import ArbitrageOpportunity, OpportunityType
 from polyarb.platforms.base import PlatformInterface, Market
@@ -83,6 +82,26 @@ def test_intra_platform_arbitrage_detection():
     opp = opportunities[0]
     assert opp.opportunity_type == OpportunityType.INTRA_PLATFORM
     assert opp.profit_percentage > 0
+
+
+def test_intra_platform_cost_inputs_can_remove_a_gross_candidate():
+    market = Market(
+        id="cost-sensitive",
+        platform="MockPlatform",
+        question="Cost-sensitive synthetic market?",
+        outcomes=["Yes", "No"],
+        prices={"Yes": 0.49, "No": 0.49},
+    )
+    platform = MockPlatform(markets=[market])
+    engine = ArbitrageEngine(
+        platforms=[platform],
+        min_profit_threshold=0.0,
+        max_total_price_threshold=0.99,
+        fee_rate_bps=100,
+        slippage_bps=100,
+    )
+
+    assert engine.find_opportunities() == []
 
 
 def test_no_arbitrage_when_prices_sum_to_one():
@@ -220,3 +239,27 @@ def test_cross_platform_arbitrage_detection():
     ]
     
     assert len(cross_platform_opps) > 0
+
+
+def test_cross_platform_candidate_order_is_deterministic():
+    markets = [
+        Market(
+            id="market_1",
+            platform="Platform1",
+            question="Same synthetic event?",
+            outcomes=["Yes", "No"],
+            prices={"Yes": 0.60, "No": 0.40},
+        ),
+        Market(
+            id="market_2",
+            platform="Platform2",
+            question="Same synthetic event?",
+            outcomes=["No", "Yes"],
+            prices={"No": 0.30, "Yes": 0.70},
+        ),
+    ]
+    engine = ArbitrageEngine(min_profit_threshold=0.0)
+
+    candidates = engine._analyze_cross_platform_market_group(markets)
+
+    assert [candidate.strategy["outcome"] for candidate in candidates] == ["No", "Yes"]

@@ -1,9 +1,9 @@
 """
-Report generation for opportunities and performance.
+Report generation for research candidates and explicitly bounded metrics.
 """
 
 import csv
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 from datetime import datetime
 from pathlib import Path
 
@@ -13,7 +13,7 @@ from polyarb.reporting.performance_tracker import PerformanceMetrics
 
 class ReportGenerator:
     """
-    Generates CSV and HTML reports for opportunities and performance.
+    Generates CSV and HTML research reports.
     """
     
     def __init__(self, output_dir: str = "./reports"):
@@ -57,15 +57,16 @@ class ReportGenerator:
                 "Name",
                 "Legs",
                 "Total Cost",
-                "Expected Profit",
-                "Profit %",
-                "Adjusted Profit %",
-                "Risk Level",
+                "Model-Implied Edge",
+                "Model-Implied Edge %",
+                "Adjusted Model Edge %",
+                "Research Risk Label",
                 "Liquidity Score",
                 "Max Size",
                 "Markets",
-                "Pure Arb",
+                "Legacy Pure-Arb Model Flag",
                 "Topic",
+                "Lifecycle State",
                 "Discovered At"
             ])
             
@@ -79,13 +80,18 @@ class ReportGenerator:
                     f"{opp.total_cost:.4f}",
                     f"{opp.expected_profit:.4f}",
                     f"{opp.profit_percentage:.2f}",
-                    f"{opp.adjusted_profit_percentage:.2f}" if opp.adjusted_profit_percentage else "",
+                    f"{opp.adjusted_profit_percentage:.2f}"
+                    if opp.adjusted_profit_percentage is not None
+                    else "",
                     opp.risk_level.value,
-                    f"{opp.liquidity_score:.2f}" if opp.liquidity_score else "",
-                    f"{opp.max_size:.0f}" if opp.max_size else "",
+                    f"{opp.liquidity_score:.2f}"
+                    if opp.liquidity_score is not None
+                    else "",
+                    f"{opp.max_size:.0f}" if opp.max_size is not None else "",
                     len(opp.market_ids),
                     opp.is_pure_arbitrage,
                     opp.topic or "",
+                    opp.lifecycle_state.value,
                     opp.discovered_at.isoformat()
                 ])
         
@@ -95,7 +101,7 @@ class ReportGenerator:
         self,
         opportunities: List[EnhancedOpportunity],
         filename: Optional[str] = None,
-        title: str = "Arbitrage Opportunities"
+        title: str = "Prediction-Market Research Candidates"
     ) -> str:
         """
         Generate HTML report of opportunities.
@@ -183,7 +189,9 @@ class ReportGenerator:
     
     <div class="summary">
         <h2>Summary</h2>
-        <p><strong>Total Opportunities:</strong> {len(opportunities)}</p>
+        <p><strong>Total Candidates:</strong> {len(opportunities)}</p>
+        <p><strong>Boundary:</strong> Model outputs only; not submitted, filled,
+        settled, or performance records.</p>
         <p><strong>Generated:</strong> {datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")} UTC</p>
     </div>
     
@@ -194,11 +202,11 @@ class ReportGenerator:
                 <th>Name</th>
                 <th>Legs</th>
                 <th>Cost</th>
-                <th>Profit %</th>
-                <th>Adj. Profit %</th>
-                <th>Risk</th>
+                <th>Model Edge %</th>
+                <th>Adj. Model Edge %</th>
+                <th>Research Risk</th>
                 <th>Liquidity</th>
-                <th>Pure Arb</th>
+                <th>Legacy Pure-Arb Model Flag</th>
             </tr>
         </thead>
         <tbody>
@@ -207,6 +215,16 @@ class ReportGenerator:
         for opp in sorted_opps:
             profit_class = "profit-high" if opp.profit_percentage >= 2.0 else "profit-medium"
             risk_class = f"risk-{opp.risk_level.value}"
+            adjusted_edge = (
+                f"{opp.adjusted_profit_percentage:.2f}%"
+                if opp.adjusted_profit_percentage is not None
+                else "N/A"
+            )
+            liquidity = (
+                f"{opp.liquidity_score:.2f}"
+                if opp.liquidity_score is not None
+                else "N/A"
+            )
             
             html += f"""
             <tr>
@@ -215,9 +233,9 @@ class ReportGenerator:
                 <td>{len(opp.legs)}</td>
                 <td>{opp.total_cost:.4f}</td>
                 <td class="{profit_class}">{opp.profit_percentage:.2f}%</td>
-                <td>{opp.adjusted_profit_percentage:.2f}% if opp.adjusted_profit_percentage else 'N/A'</td>
+                <td>{adjusted_edge}</td>
                 <td class="{risk_class}">{opp.risk_level.value}</td>
-                <td>{opp.liquidity_score:.2f if opp.liquidity_score else 'N/A'}</td>
+                <td>{liquidity}</td>
                 <td>{'✓' if opp.is_pure_arbitrage else '✗'}</td>
             </tr>
 """
@@ -240,10 +258,10 @@ class ReportGenerator:
         filename: Optional[str] = None
     ) -> str:
         """
-        Generate HTML performance report.
+        Generate an HTML research-metrics report.
         
         Args:
-            metrics: Performance metrics
+            metrics: Backward-compatible research metrics object
             filename: Output filename
             
         Returns:
@@ -251,7 +269,7 @@ class ReportGenerator:
         """
         if filename is None:
             timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-            filename = f"performance_{timestamp}.html"
+            filename = f"research_metrics_{timestamp}.html"
         
         filepath = self.output_dir / filename
         
@@ -259,7 +277,7 @@ class ReportGenerator:
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Performance Report</title>
+    <title>Research Metrics Report</title>
     <style>
         body {{
             font-family: Arial, sans-serif;
@@ -305,41 +323,43 @@ class ReportGenerator:
     </style>
 </head>
 <body>
-    <h1>Performance Report</h1>
+    <h1>Research Metrics Report</h1>
+    <p>Detected candidates and simulations are not live orders or performance.
+    Settled-result fields require a real settlement record.</p>
     
     <div class="section">
         <h2>Overview</h2>
         <div class="metric">
             <div class="metric-value">{metrics.total_opportunities}</div>
-            <div class="metric-label">Total Opportunities</div>
+            <div class="metric-label">Total Candidates</div>
         </div>
         <div class="metric">
             <div class="metric-value">{metrics.executed_opportunities}</div>
-            <div class="metric-label">Executed</div>
+            <div class="metric-label">Submitted Orders</div>
         </div>
         <div class="metric">
             <div class="metric-value">{metrics.successful_executions}</div>
-            <div class="metric-label">Successful</div>
+            <div class="metric-label">Filled/Settled Records</div>
         </div>
         <div class="metric">
             <div class="metric-value">{metrics.hit_rate:.1%}</div>
-            <div class="metric-label">Hit Rate</div>
+            <div class="metric-label">Positive Settled-Result Rate</div>
         </div>
     </div>
     
     <div class="section">
-        <h2>Financial Metrics</h2>
+        <h2>Modeled and Settled Fields</h2>
         <div class="metric">
-            <div class="metric-value">${metrics.total_theoretical_profit:.2f}</div>
-            <div class="metric-label">Theoretical Profit</div>
+            <div class="metric-value">${metrics.total_model_implied_edge:.2f}</div>
+            <div class="metric-label">Total Model-Implied Edge</div>
         </div>
         <div class="metric">
             <div class="metric-value">${metrics.total_realized_profit:.2f}</div>
-            <div class="metric-label">Realized Profit</div>
+            <div class="metric-label">Settled Result (Requires Settlement)</div>
         </div>
         <div class="metric">
             <div class="metric-value">{metrics.avg_profit_percentage:.2f}%</div>
-            <div class="metric-label">Avg Profit %</div>
+            <div class="metric-label">Avg Model-Implied Edge %</div>
         </div>
         <div class="metric">
             <div class="metric-value">{metrics.avg_slippage_bps:.1f}</div>
@@ -353,8 +373,8 @@ class ReportGenerator:
             <tr>
                 <th>Class</th>
                 <th>Count</th>
-                <th>Total Profit</th>
-                <th>Avg Profit %</th>
+                <th>Total Model Edge</th>
+                <th>Avg Model Edge %</th>
             </tr>
 """
         
@@ -378,8 +398,8 @@ class ReportGenerator:
             <tr>
                 <th>Topic</th>
                 <th>Count</th>
-                <th>Total Profit</th>
-                <th>Avg Profit %</th>
+                <th>Total Model Edge</th>
+                <th>Avg Model Edge %</th>
             </tr>
 """
         

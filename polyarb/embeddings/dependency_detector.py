@@ -5,17 +5,16 @@ This module uses LLMs to analyze markets and identify dependencies,
 contradictions, and logical relationships that enable combinatorial arbitrage.
 """
 
-from typing import List, Dict, Any, Optional, Tuple
-import json
-from datetime import datetime, timedelta
+from typing import List, Dict, Any, Optional
+from datetime import datetime
 
 
 class DependencyDetector:
     """
     Detects logical dependencies between markets using LLM analysis.
     
-    Note: This is a framework class. In production, you would integrate
-    with an actual LLM API (OpenAI, Anthropic, etc.).
+    Placeholder only. Any future LLM integration requires separate implementation,
+    data-handling review, and validation.
     """
     
     def __init__(
@@ -172,7 +171,7 @@ class DependencyDetector:
             return self._generate_all_combinations(outcomes1, outcomes2)
         
         # Prepare prompt for LLM
-        prompt = self._create_outcome_table_prompt(
+        _prompt = self._create_outcome_table_prompt(
             market1, outcomes1,
             market2, outcomes2
         )

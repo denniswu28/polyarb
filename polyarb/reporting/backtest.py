@@ -1,13 +1,12 @@
 """
-Backtesting framework for historical replay.
+Historical backtesting API placeholder.
 """
 
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from polyarb.scanner.enhanced_opportunity import EnhancedOpportunity
-from polyarb.reporting.performance_tracker import PerformanceTracker, PerformanceMetrics
+from polyarb.reporting.performance_tracker import PerformanceMetrics
 
 
 @dataclass
@@ -27,26 +26,31 @@ class BacktestResult:
     config: Dict[str, Any] = field(default_factory=dict)
     
     def summary(self) -> str:
-        """Get summary string."""
+        """Render the compatibility result schema without implying validation."""
+        average_edge = (
+            f"{self.metrics.avg_profit_percentage:.2f}%" if self.metrics else "N/A"
+        )
+        settled_rate = f"{self.metrics.hit_rate:.1%}" if self.metrics else "N/A"
         return f"""
-Backtest Results
-================
+Backtest Result Schema (historical replay is not implemented)
+=============================================================
 Period: {self.start_date.date()} to {self.end_date.date()}
 Total Opportunities: {self.total_opportunities}
 Total Trades: {self.total_trades}
-Total Profit: ${self.total_profit:.2f}
+Model-Implied Edge: ${self.total_profit:.2f}
 
-Average Profit %: {self.metrics.avg_profit_percentage:.2f}% if self.metrics else 'N/A'
-Hit Rate: {self.metrics.hit_rate:.1%} if self.metrics else 'N/A'
+Average Model Edge %: {average_edge}
+Positive Settled-Result Rate: {settled_rate}
 """
 
 
 class Backtester:
     """
-    Backtests arbitrage strategies on historical data.
-    
-    Note: This is a framework class. Full implementation requires
-    historical orderbook and price data.
+    Fail-closed placeholder retained for API compatibility.
+
+    Historical replay is not implemented or validated. In particular, the
+    repository has no historical order-book dataset, fill model, or settlement
+    model that could support backtest or performance claims.
     """
     
     def __init__(
@@ -58,8 +62,8 @@ class Backtester:
         Initialize backtester.
         
         Args:
-            min_profit_threshold: Minimum profit threshold
-            max_total_price_threshold: Maximum total price for arb
+            min_profit_threshold: Legacy model-edge threshold field
+            max_total_price_threshold: Legacy conditional basket-cost threshold
         """
         self.min_profit_threshold = min_profit_threshold
         self.max_total_price_threshold = max_total_price_threshold
@@ -83,38 +87,10 @@ class Backtester:
         Returns:
             BacktestResult
         """
-        tracker = PerformanceTracker()
-        
-        # Filter data by date range
-        filtered_markets = [
-            m for m in markets_data
-            if self._is_in_date_range(m, start_date, end_date)
-        ]
-        
-        # Simulate opportunity discovery
-        # In real implementation, replay historical orderbook snapshots
-        for market_snapshot in filtered_markets:
-            opportunity = self._simulate_opportunity_from_snapshot(market_snapshot)
-            if opportunity:
-                tracker.add_opportunity(opportunity)
-        
-        # Calculate metrics
-        metrics = tracker.calculate_metrics()
-        
-        result = BacktestResult(
-            start_date=start_date,
-            end_date=end_date,
-            total_opportunities=metrics.total_opportunities,
-            total_profit=metrics.total_theoretical_profit,
-            total_trades=metrics.executed_opportunities,
-            metrics=metrics,
-            config={
-                "min_profit_threshold": self.min_profit_threshold,
-                "max_total_price_threshold": self.max_total_price_threshold,
-            }
+        del start_date, end_date, markets_data, kwargs
+        raise NotImplementedError(
+            "Historical backtesting is not implemented or validated in polyarb."
         )
-        
-        return result
     
     def _is_in_date_range(
         self,
@@ -135,11 +111,11 @@ class Backtester:
     def _simulate_opportunity_from_snapshot(
         self,
         market_snapshot: Dict[str, Any]
-    ) -> Optional[EnhancedOpportunity]:
+    ) -> None:
         """
         Simulate opportunity discovery from historical snapshot.
         
-        This is a placeholder. Real implementation would:
+        Any future implementation would need to:
         1. Reconstruct orderbook state
         2. Calculate prices
         3. Run scanner logic
@@ -151,9 +127,10 @@ class Backtester:
         Returns:
             EnhancedOpportunity or None
         """
-        # Placeholder implementation
-        # In production, this would use actual historical orderbook data
-        return None
+        del market_snapshot
+        raise NotImplementedError(
+            "Historical snapshot replay is not implemented or validated in polyarb."
+        )
     
     def compare_price_types(
         self,
@@ -161,7 +138,7 @@ class Backtester:
         price_types: List[str]
     ) -> Dict[str, BacktestResult]:
         """
-        Compare performance across different price types.
+        Placeholder for a historical price-type comparison.
         
         Args:
             markets_data: Historical market data
@@ -170,28 +147,7 @@ class Backtester:
         Returns:
             Dictionary mapping price_type to BacktestResult
         """
-        results = {}
-        
-        # Get date range
-        if markets_data:
-            start_date = min(
-                m.get("timestamp") for m in markets_data if m.get("timestamp")
-            )
-            end_date = max(
-                m.get("timestamp") for m in markets_data if m.get("timestamp")
-            )
-        else:
-            start_date = datetime.utcnow()
-            end_date = datetime.utcnow()
-        
-        # Run backtest for each price type
-        for price_type in price_types:
-            result = self.run_backtest(
-                start_date=start_date,
-                end_date=end_date,
-                markets_data=markets_data,
-                price_type=price_type
-            )
-            results[price_type] = result
-        
-        return results
+        del markets_data, price_types
+        raise NotImplementedError(
+            "Historical price-type comparison is not implemented or validated in polyarb."
+        )

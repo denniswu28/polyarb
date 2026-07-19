@@ -1,9 +1,11 @@
 """
-Run the SingleEventMultiMarketScanner against live Polymarket data.
+Opt-in research scan against public Polymarket data.
 
 This example fetches active events from the public Polymarket Gamma API, keeps
 markets that expose YES token IDs, and scans them for single-event, multi-market
-arbitrage when an "other" option completes the outcome space.
+model-implied basket edges when an "other" option appears to complete the outcome
+space. It does not validate contract equivalence or resolution rules and does not
+approve, simulate, or submit orders.
 """
 
 import argparse
@@ -81,6 +83,8 @@ async def run_scan(limit: int, min_profit: float, max_total_price: float, price_
         min_profit_threshold=min_profit,
         max_total_price_threshold=max_total_price,
         price_type=price_type,
+        fee_rate_bps=10.0,
+        slippage_bps=10.0,
     )
 
     markets = fetch_markets(limit=limit)
@@ -88,7 +92,7 @@ async def run_scan(limit: int, min_profit: float, max_total_price: float, price_
         print("No markets with token IDs were returned from the API.")
         return
 
-    print(f"Scanning {len(markets)} markets for single-event multi-market arbitrage...")
+    print(f"Scanning {len(markets)} markets for conditional model-implied edges...")
     result = await scanner.scan(markets)
     print(f"Scan complete in {result.scan_duration_ms:.0f} ms")
 
@@ -97,12 +101,14 @@ async def run_scan(limit: int, min_profit: float, max_total_price: float, price_
     else:
         for idx, opp in enumerate(result.opportunities, start=1):
             print()
-            print(f"Opportunity #{idx}: {opp.name}")
+            print(f"Detected candidate #{idx}: {opp.name}")
             print(f"  Event IDs: {', '.join(opp.event_ids)}")
             print(f"  Markets: {', '.join(opp.market_ids)}")
-            print(f"  Total Cost: {opp.total_cost:.4f}")
-            print(f"  Profit %: {opp.profit_percentage:.2f}%")
-            print(f"  Adjusted Profit %: {opp.adjusted_profit_percentage:.2f}%")
+            print(f"  Quoted ASK Cost: {opp.total_cost:.4f}")
+            print(f"  Model-implied edge: {opp.profit_percentage:.2f}%")
+            print(f"  Spread-adjusted model edge: {opp.adjusted_profit_percentage:.2f}%")
+
+    print("Detected candidates are not approved, submitted, filled, settled, or reported trades.")
 
     await clob_client.close()
 
@@ -111,7 +117,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=200, help="Number of events to fetch")
     parser.add_argument(
-        "--min-profit", type=float, default=0.5, help="Minimum profit percentage threshold"
+        "--min-profit", type=float, default=0.5, help="Minimum model-edge percentage"
     )
     parser.add_argument(
         "--max-total-price",
@@ -123,8 +129,8 @@ def main():
         "--price-type",
         type=str,
         default="ASK",
-        choices=[pt.name for pt in PriceType],
-        help="Price type to use for pricing legs",
+        choices=[PriceType.ASK.name],
+        help="Buy-side pricing orientation; only ASK is supported",
     )
 
     args = parser.parse_args()

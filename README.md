@@ -1,240 +1,159 @@
-# Polyarb - Prediction Market Arbitrage Engine
+# polyarb
 
-An intelligent arbitrage detection system for prediction markets including Polymarket, PredictIt, and Kalshi. Polyarb identifies both intra-platform and cross-platform arbitrage opportunities to maximize profit potential.
+`polyarb` is a prediction-market research and opportunity-scanning framework.
+Its public, reproducible path uses deterministic synthetic data and simulated
+execution only. This code has never submitted a real order.
 
-## Enhanced System Architecture
+Scanner output is a model-implied candidate, not evidence of an approved,
+submitted, filled, settled, profitable, or legally permissible trade. No public
+performance or profit claim is made.
 
-Beyond the core engine, the enhanced Polymarket system is organized into six modules that work together:
+## Evidence status
 
-1. **Data, Market State & Storage** – SQLAlchemy models, order book accessors, and price abstractions for ASK/BID/MID/LIVE/ACTUAL.
-2. **Strategy Template Library** – Reusable strategy builders (e.g., `all_no`, `balanced`) and a registry for filtering and discovery.
-3. **Embedding & Dependency Detection** – Event embeddings, clustering, and LLM-based dependency detection for combinatorial arbitrage.
-4. **Enhanced Arbitrage Scanner** – Single-condition, NegRisk, and strategy-aware scanners with liquidity-aware profitability scoring.
-5. **Execution & Risk Management** – Basket execution, slippage tracking, and configurable risk limits across strategies and markets.
-6. **Evaluation, Backtesting & Reporting** – Performance tracking, historical replay utilities, and CSV/HTML report generation.
+| Surface | Status | Evidence boundary |
+| --- | --- | --- |
+| Core synthetic market scanning | Implemented and tested | Offline intra-venue candidate detection and illustrative cross-venue quote comparison |
+| Polymarket parsing and public-data scanning | Implemented; owner-validated | Live public API use is opt-in and excluded from CI |
+| Price orientation | Implemented and tested | Long-only basket scanners accept executable ASK costs only; BID/MID/LIVE/ACTUAL inputs fail closed |
+| Fees, slippage, liquidity, and risk inputs | Implemented and tested | Explicit research assumptions; not a fill guarantee or platform risk model |
+| Basket execution | Simulated only | Deterministic paper fills; no order IDs, credentials, wallet, funded account, or submission |
+| Research reporting | Implemented with boundaries | Simulations are excluded from submitted, filled, settled, and realized-result counts |
+| SQL storage and optional embedding modules | Experimental | Module surfaces exist; not exercised by the default example or full end-to-end CI |
+| Rule/dependency analysis | Experimental/placeholder | Heuristic framework; no validated LLM integration |
+| PredictIt | Not implemented or validated | Adapter fails closed with `NotImplementedError` |
+| Kalshi | Not implemented or validated | Adapter fails closed with `NotImplementedError` |
+| Automated live execution | Intentionally unavailable | Live mode raises before credentials, wallets, or network order clients are consulted |
+| Historical backtesting | Not implemented or validated | Compatibility API fails closed; no historical replay or performance result |
+| Dashboard, database service, alerts, live monitoring | Planned/not implemented | No implementation claim |
 
-See `ENHANCED_SYSTEM.md` for a full breakdown and walkthrough.
+Dennis reports validating Polymarket data/scanning and authentication/order-related
+paths without submitting a real order. PredictIt and Kalshi behavior has not been
+validated. See [PROVENANCE.md](PROVENANCE.md) for the owner and agent-contribution
+record.
 
-## Features
+## Lifecycle vocabulary
 
-- 🎯 **Intra-Platform Arbitrage**: Detect opportunities within a single platform where the sum of outcome prices is less than 1
-- 🔄 **Cross-Platform Arbitrage**: Identify price discrepancies for the same markets across different platforms
-- 🏗️ **Modular Architecture**: Easily extend with new platform integrations
-- ⚙️ **Configurable**: Customize profit thresholds, refresh intervals, and more
-- 🔌 **Platform Support**:
-  - ✅ Polymarket (implemented)
-  - 🚧 PredictIt (framework ready)
-  - 🚧 Kalshi (framework ready)
+The code and reports keep these states distinct:
 
-## Installation
+| State | Meaning |
+| --- | --- |
+| `detected` | A scanner found a model-implied candidate |
+| `approved` | Configured research/risk checks passed; no order exists |
+| `simulated` | A deterministic paper-fill scenario ran; no order exists |
+| `submitted` | A real order was sent to a platform (unsupported in this repository) |
+| `filled` / `partially_filled` | A submitted order received real fills (unsupported) |
+| `cancelled` | A submitted order was cancelled, or a simulation modeled a no-fill; the mode remains explicit |
+| `settled` | A filled contract has a recorded platform settlement (unsupported) |
+| `reported` | A research record was emitted; reporting does not upgrade execution evidence |
+
+## Reproduce the offline example
+
+Python 3.10, 3.11, and 3.12 are the documented versions and are exercised in
+GitHub Actions. The same commands are used on Windows and Linux:
 
 ```bash
-# Clone the repository
 git clone https://github.com/denniswu28/polyarb.git
 cd polyarb
-
-# Install dependencies
-pip install -r requirements.txt
-
-# For development
-pip install -r requirements-dev.txt
+python -m pip install .
+python -m examples.demo_with_mock_data
 ```
 
-## Quick Start
+The final command is deterministic, uses only committed synthetic fixtures, and
+requires no network access, credentials, wallet, account, or private data.
+
+For development:
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest -q
+python -m ruff check .
+python -m examples.demo_with_mock_data
+```
+
+Optional extras are installed explicitly:
+
+```bash
+python -m pip install -e ".[clob]"
+python -m pip install -e ".[embeddings]"
+python -m pip install -e ".[postgres]"
+```
+
+These extras are not necessary for the supported offline path.
+
+## Minimal offline use
 
 ```python
 from polyarb import ArbitrageEngine
-from polyarb.platforms.polymarket import PolymarketPlatform
+from polyarb.platforms.base import Market
 
-# Initialize platform
-polymarket = PolymarketPlatform()
-
-# Create arbitrage engine
-engine = ArbitrageEngine(
-    platforms=[polymarket],
-    min_profit_threshold=1.0  # 1% minimum profit
+market = Market(
+    id="synthetic-1",
+    platform="SyntheticVenue",
+    question="Synthetic binary outcome?",
+    outcomes=["Yes", "No"],
+    prices={"Yes": 0.45, "No": 0.50},
 )
 
-# Find opportunities
-opportunities = engine.find_opportunities()
-
-# Display results
-for opp in opportunities:
-    print(f"Profit: {opp.profit_percentage:.2f}%")
-    print(f"Strategy: {opp.description}")
+# A local test platform can expose this Market through PlatformInterface.
+engine = ArbitrageEngine(fee_rate_bps=10, slippage_bps=10)
 ```
 
-## Usage Examples
+See [QUICKSTART.md](QUICKSTART.md) for a complete runnable command. Public
+Polymarket examples in `examples/basic_usage.py` and
+`examples/single_event_multi_market_scan.py` are opt-in network examples; they
+are not part of CI or the default reproduction claim.
 
-### Basic Usage
+## Methodology boundaries
 
-Run the included example to see the engine in action:
+- Long-only basket costs use ASK prices. BID is a sell price; MID and last-trade
+  values are references, not executable buy costs.
+- Candidate arithmetic assumes the selected contracts are mutually exclusive
+  and exhaustive and that settlement rules deliver the modeled payoff. The
+  scanner does not prove those assumptions.
+- Fees and slippage are explicit inputs. Displayed depth is a liquidity
+  constraint, not a fill forecast.
+- Cross-venue output is a quote-discrepancy research candidate. Contract
+  equivalence, short/sell availability, transfer constraints, platform rules,
+  and atomic execution are not established.
+- A simulation is never included as submitted, filled, settled, or realized
+  performance. Historical backtesting is unavailable.
 
-```bash
-python examples/basic_usage.py
-```
+More detail is in [METHODOLOGY.md](METHODOLOGY.md).
 
-### Configuration
+## Data and execution safety
 
-Create a `.env` file in the project root (see `.env.example`):
+- Committed example data is deterministic synthetic/mock data only.
+- Private account data, real trade records, credentials, wallet material,
+  employer-derived content, proprietary content, and redistributed vendor
+  datasets are excluded.
+- Tests, CI, and the default example are offline after dependency installation.
+- Live order submission is hard-disabled. `BasketExecutor` defaults to
+  `ExecutionMode.SIMULATED`; live mode and `submit_live_order()` fail closed.
+- `.env` and common generated/private outputs are ignored. Never commit secrets
+  or account exports.
 
-```bash
-# Optional API keys
-POLYMARKET_API_KEY=your_key_here
+See [DATA_POLICY.md](DATA_POLICY.md), [SECURITY.md](SECURITY.md), and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-# Engine settings
-MIN_PROFIT_THRESHOLD=1.0
-MAX_TOTAL_PRICE_THRESHOLD=0.98
-REFRESH_INTERVAL=60
-```
+## Repository layout
 
-### Custom Integration
-
-```python
-from polyarb.config import Config
-from polyarb import ArbitrageEngine
-from polyarb.platforms.polymarket import PolymarketPlatform
-
-# Load configuration
-config = Config()
-
-# Initialize with custom settings
-engine = ArbitrageEngine(
-    platforms=[PolymarketPlatform()],
-    min_profit_threshold=config.get("min_profit_threshold", 1.0),
-    max_total_price_threshold=config.get("max_total_price_threshold", 0.98)
-)
-
-# Find and filter opportunities
-opportunities = engine.find_opportunities()
-high_confidence_opps = [o for o in opportunities if o.confidence > 0.9]
-```
-
-## Project Structure
-
-```
+```text
 polyarb/
-├── polyarb/
-│   ├── __init__.py           # Package entry point
-│   ├── config.py             # Configuration management
-│   ├── core/
-│   │   ├── arbitrage_engine.py  # Main arbitrage detection logic
-│   │   └── opportunity.py       # Opportunity data structures
-│   └── platforms/
-│       ├── base.py              # Base platform interface
-│       └── polymarket.py        # Polymarket integration
-├── examples/
-│   └── basic_usage.py        # Usage examples
-├── tests/                    # Test suite
-├── requirements.txt          # Core dependencies
-├── requirements-dev.txt      # Development dependencies
-└── pyproject.toml           # Project configuration
+  core/        candidate arithmetic and lifecycle states
+  data/        public-data clients, price access, optional SQL models
+  scanner/     long-only research scanners
+  execution/   risk checks and deterministic simulated fills
+  reporting/   research reports; backtest API fails closed
+  platforms/   Polymarket plus fail-closed PredictIt/Kalshi placeholders
+examples/      offline default plus opt-in experimental/network examples
+tests/         focused offline invariant and safety tests
 ```
 
-## How It Works
+## License and rules
 
-### Intra-Platform Arbitrage
+The repository is MIT-licensed; see [LICENSE](LICENSE). Dependency license
+metadata, example-origin review, and unresolved platform-term checks are recorded
+in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Users remain responsible for
+reviewing applicable law, eligibility, contract rules, and current platform terms.
 
-In an efficient market, the sum of probabilities (prices) for all outcomes should equal 1. When this sum is less than 1, you can buy all outcomes and guarantee a profit:
-
-```
-Market: "Will it rain tomorrow?"
-- Yes: $0.45
-- No: $0.50
-- Total: $0.95
-
-Strategy: Buy both outcomes for $0.95, guaranteed return of $1.00
-Profit: $0.05 (5.26% return)
-```
-
-### Cross-Platform Arbitrage
-
-When the same market exists on multiple platforms with different prices, you can buy low on one platform and sell high on another:
-
-```
-Market: "Will candidate X win?"
-- Platform A: Yes at $0.55
-- Platform B: Yes at $0.65
-
-Strategy: Buy on Platform A, sell on Platform B
-Profit: $0.10 per share (18.2% return)
-```
-
-## Extending to New Platforms
-
-To add a new platform (e.g., PredictIt):
-
-1. Create a new file in `polyarb/platforms/`:
-
-```python
-from polyarb.platforms.base import PlatformInterface, Market
-
-class PredictItPlatform(PlatformInterface):
-    @property
-    def platform_name(self) -> str:
-        return "PredictIt"
-    
-    def get_markets(self, limit=None):
-        # Implement API integration
-        pass
-    
-    def get_market(self, market_id):
-        # Implement single market fetch
-        pass
-```
-
-2. Add it to the engine:
-
-```python
-from polyarb.platforms.predictit import PredictItPlatform
-
-engine = ArbitrageEngine(platforms=[
-    PolymarketPlatform(),
-    PredictItPlatform()
-])
-```
-
-## Development
-
-```bash
-# Run tests
-pytest
-
-# Format code
-black polyarb/
-
-# Lint code
-ruff check polyarb/
-```
-
-## Roadmap
-
-- [x] Core arbitrage detection engine
-- [x] Polymarket integration
-- [x] Intra-platform arbitrage detection
-- [x] Cross-platform arbitrage detection
-- [ ] PredictIt integration
-- [ ] Kalshi integration
-- [ ] Real-time monitoring and alerts
-- [ ] Web dashboard
-- [ ] Automated execution (with user approval)
-- [ ] Historical analysis and backtesting
-
-## Disclaimer
-
-This software is for educational and research purposes only. Arbitrage trading involves risk, and you should:
-
-- Understand the platforms' terms of service
-- Consider transaction fees and execution delays
-- Be aware of market liquidity constraints
-- Never invest more than you can afford to lose
-
-The authors are not responsible for any financial losses incurred while using this software.
-
-## License
-
-MIT License - see [LICENSE](LICENSE) for details.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+This software is for research and education, not financial, legal, or investment advice.

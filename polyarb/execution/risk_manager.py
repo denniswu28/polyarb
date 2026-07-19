@@ -2,9 +2,8 @@
 Risk management and position limits.
 """
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
-from decimal import Decimal
 
 from polyarb.scanner.enhanced_opportunity import EnhancedOpportunity, RiskLevel
 
@@ -72,11 +71,20 @@ class RiskManager:
             Tuple of (passed, list of violation messages)
         """
         violations = []
+
+        if proposed_size <= 0:
+            violations.append("Proposed size must be positive")
+
+        if opportunity.max_size is not None and proposed_size > opportunity.max_size:
+            violations.append(
+                f"Proposed size {proposed_size:.2f} exceeds liquidity-constrained "
+                f"maximum {opportunity.max_size:.2f}"
+            )
         
-        # Check profit threshold
+        # Check the backward-compatible model-edge field.
         if opportunity.profit_percentage < self.limits.min_profit_threshold:
             violations.append(
-                f"Profit {opportunity.profit_percentage:.2f}% below threshold "
+                f"Modeled edge {opportunity.profit_percentage:.2f}% below threshold "
                 f"{self.limits.min_profit_threshold:.2f}%"
             )
         
@@ -102,13 +110,25 @@ class RiskManager:
                 )
         
         # Check per-market limits
+        market_count = len(opportunity.market_ids)
         for market_id in opportunity.market_ids:
             current_market_exposure = self.market_exposures.get(market_id, 0.0)
             proposed_market_exposure = current_market_exposure + (
-                opportunity.total_cost * proposed_size / len(opportunity.market_ids)
+                opportunity.total_cost * proposed_size / market_count
             )
             if proposed_market_exposure > self.limits.max_per_market_notional:
                 violations.append(f"Would exceed per-market limit for {market_id}")
+
+            current_positions = sum(
+                1
+                for position in self.positions.values()
+                if position.get("market_id") == market_id
+            )
+            proposed_positions = sum(
+                1 for leg in opportunity.legs if leg.market_id == market_id
+            )
+            if current_positions + proposed_positions > self.limits.max_positions_per_market:
+                violations.append(f"Would exceed position-count limit for {market_id}")
         
         # Check topic limit
         if opportunity.topic:
@@ -130,7 +150,10 @@ class RiskManager:
                 violations.append("Would exceed rule risk exposure limit")
         
         # Check liquidity
-        if opportunity.liquidity_score and opportunity.liquidity_score < self.limits.min_liquidity_score:
+        if (
+            opportunity.liquidity_score is not None
+            and opportunity.liquidity_score < self.limits.min_liquidity_score
+        ):
             violations.append(
                 f"Liquidity score {opportunity.liquidity_score:.2f} below minimum "
                 f"{self.limits.min_liquidity_score:.2f}"
@@ -141,6 +164,17 @@ class RiskManager:
             violations.append(f"Already at max positions limit: {self.limits.max_positions}")
         
         passed = len(violations) == 0
+        return passed, violations
+
+    def approve_opportunity(
+        self,
+        opportunity: EnhancedOpportunity,
+        proposed_size: float,
+    ) -> tuple[bool, List[str]]:
+        """Apply configured checks and record approval only when every check passes."""
+        passed, violations = self.check_opportunity(opportunity, proposed_size)
+        if passed:
+            opportunity.approve()
         return passed, violations
     
     def add_position(
@@ -208,7 +242,7 @@ class RiskManager:
             # Clean up tracking
             del self.positions[token_id]
     
-    def get_exposure_summary(self) -> Dict[str, any]:
+    def get_exposure_summary(self) -> Dict[str, Any]:
         """
         Get summary of current exposures.
         
@@ -244,6 +278,9 @@ class RiskManager:
         Returns:
             Suggested position size
         """
+        if opportunity.total_cost <= 0:
+            return 0.0
+
         # Start with max size from liquidity
         size = max_size if max_size else 100.0
         

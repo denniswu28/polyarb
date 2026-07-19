@@ -3,7 +3,7 @@ Scanner for strategy-based opportunities (all_no, balanced, custom).
 """
 
 import uuid
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 from datetime import datetime
 
 from polyarb.scanner.base_scanner import BaseScanner, ScanResult
@@ -14,15 +14,15 @@ from polyarb.scanner.enhanced_opportunity import (
     Leg
 )
 from polyarb.data.models import PriceType
-from polyarb.strategies.base import Strategy, StrategyMethod, StrategyType
+from polyarb.strategies.base import Strategy, StrategyMethod
 
 
 class StrategyScanner(BaseScanner):
     """
-    Scans strategies from registry for profitability.
+    Scans registered strategies for model-implied edge.
     
     Evaluates strategy templates (all_no, balanced) with current market prices
-    to identify arbitrage opportunities.
+    to identify conditional model-implied candidates.
     """
     
     async def scan_strategies(
@@ -44,6 +44,7 @@ class StrategyScanner(BaseScanner):
         """
         start_time = datetime.utcnow()
         price_type = price_type or self.price_type
+        self.require_buy_price_type(price_type)
         opportunities = []
         
         for strategy in strategies:
@@ -68,7 +69,7 @@ class StrategyScanner(BaseScanner):
         price_type: PriceType
     ) -> Optional[EnhancedOpportunity]:
         """
-        Evaluate a strategy for profitability.
+        Evaluate a strategy under its declared payoff assumptions.
         
         Args:
             strategy: Strategy to evaluate
@@ -133,30 +134,31 @@ class StrategyScanner(BaseScanner):
         n = len(legs)
         worst_case_payoff = float(n - 1)  # n-1 positions win
         
-        # Calculate profit metrics
+        # Calculate model-implied edge using backward-compatible field names.
         metrics = self.calculate_profit_metrics(
             total_cost=total_cost,
             worst_case_payoff=worst_case_payoff,
-            best_case_payoff=worst_case_payoff
+            best_case_payoff=worst_case_payoff,
+            fee_rate_bps=self.fee_rate_bps,
+            slippage_bps=self.slippage_bps,
         )
         
-        if not self.is_opportunity_valid(metrics["profit_percentage"], total_cost):
+        if not self.is_opportunity_valid(
+            metrics["profit_percentage"], metrics["effective_cost"]
+        ):
             return None
         
         # Apply spread adjustment
-        adjusted_cost = self.apply_spread_adjustment(total_cost, legs)
+        adjusted_cost = self.apply_spread_adjustment(metrics["effective_cost"], legs)
         adjusted_profit = worst_case_payoff - adjusted_cost
         adjusted_profit_pct = (adjusted_profit / adjusted_cost * 100) if adjusted_cost > 0 else 0
         
         # Estimate liquidity
         liquidity_score = self.estimate_liquidity_score(legs)
-        max_size = min(leg.depth for leg in legs if leg.depth) if any(leg.depth for leg in legs) else None
+        max_size = self.get_max_size(legs)
         
-        # Determine risk level
-        risk_level = (
-            RiskLevel.LOW if strategy.strategy_type == StrategyType.PURE_LOGICAL
-            else RiskLevel.MEDIUM
-        )
+        # Declared strategy logic does not validate platform rules or execution.
+        risk_level = RiskLevel.MEDIUM
         
         # Create opportunity
         opportunity = EnhancedOpportunity(
@@ -179,7 +181,7 @@ class StrategyScanner(BaseScanner):
             liquidity_score=liquidity_score,
             market_ids=strategy.get_markets(),
             event_ids=strategy.get_events(),
-            is_pure_arbitrage=(strategy.strategy_type == StrategyType.PURE_LOGICAL),
+            is_pure_arbitrage=False,
             tags=strategy.tags + ["all_no"],
             topic=strategy.topic,
         )
@@ -242,30 +244,31 @@ class StrategyScanner(BaseScanner):
             worst_case_payoff = 1.0
             best_case_payoff = 1.0
         
-        # Calculate profit metrics
+        # Calculate model-implied edge using backward-compatible field names.
         metrics = self.calculate_profit_metrics(
             total_cost=total_cost,
             worst_case_payoff=worst_case_payoff,
-            best_case_payoff=best_case_payoff
+            best_case_payoff=best_case_payoff,
+            fee_rate_bps=self.fee_rate_bps,
+            slippage_bps=self.slippage_bps,
         )
         
-        if not self.is_opportunity_valid(metrics["profit_percentage"], total_cost):
+        if not self.is_opportunity_valid(
+            metrics["profit_percentage"], metrics["effective_cost"]
+        ):
             return None
         
         # Apply spread adjustment
-        adjusted_cost = self.apply_spread_adjustment(total_cost, legs)
+        adjusted_cost = self.apply_spread_adjustment(metrics["effective_cost"], legs)
         adjusted_profit = worst_case_payoff - adjusted_cost
         adjusted_profit_pct = (adjusted_profit / adjusted_cost * 100) if adjusted_cost > 0 else 0
         
         # Estimate liquidity
         liquidity_score = self.estimate_liquidity_score(legs)
-        max_size = min(leg.depth for leg in legs if leg.depth) if any(leg.depth for leg in legs) else None
+        max_size = self.get_max_size(legs)
         
-        # Determine risk level
-        risk_level = (
-            RiskLevel.LOW if strategy.strategy_type == StrategyType.PURE_LOGICAL
-            else RiskLevel.MEDIUM
-        )
+        # Declared strategy logic does not validate platform rules or execution.
+        risk_level = RiskLevel.MEDIUM
         
         # Create opportunity
         opportunity = EnhancedOpportunity(
@@ -288,7 +291,7 @@ class StrategyScanner(BaseScanner):
             liquidity_score=liquidity_score,
             market_ids=strategy.get_markets(),
             event_ids=strategy.get_events(),
-            is_pure_arbitrage=(strategy.strategy_type == StrategyType.PURE_LOGICAL),
+            is_pure_arbitrage=False,
             tags=strategy.tags + ["balanced"],
             topic=strategy.topic,
         )

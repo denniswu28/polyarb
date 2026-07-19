@@ -93,10 +93,12 @@ class PlatformInterface(ABC):
     
     def initialize(self) -> bool:
         """
-        Initialize the platform connection.
+        Mark the local interface initialized without validating a connection.
+
+        Concrete adapters that require validation must override this method.
         
         Returns:
-            True if initialization successful, False otherwise
+            True when the local state transition succeeds
         """
         try:
             self._initialized = True

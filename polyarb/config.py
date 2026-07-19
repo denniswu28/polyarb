@@ -36,6 +36,8 @@ class Config:
             "min_profit_threshold": float(os.getenv("MIN_PROFIT_THRESHOLD", "1.0")),
             "max_total_price_threshold": float(os.getenv("MAX_TOTAL_PRICE_THRESHOLD", "0.98")),
             "refresh_interval": int(os.getenv("REFRESH_INTERVAL", "60")),
+            "fee_rate_bps": float(os.getenv("FEE_RATE_BPS", "0")),
+            "slippage_bps": float(os.getenv("SLIPPAGE_BPS", "0")),
             
             # Feature flags
             "enable_cross_platform": os.getenv("ENABLE_CROSS_PLATFORM", "true").lower() == "true",

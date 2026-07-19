@@ -1,17 +1,19 @@
 """
-Comprehensive example demonstrating the enhanced Polymarket arbitrage system.
+Experimental wiring example for optional polyarb modules.
 
-This example shows how to use all 6 modules together to:
-1. Fetch and store market data
+This example shows how the optional module surfaces can be wired to:
+1. Initialize local storage without supplying a dataset
 2. Create strategy templates
 3. Discover similar events
-4. Scan for arbitrage opportunities
-5. Execute with risk management
-6. Generate performance reports
+4. Scan for model-implied research candidates
+5. Simulate approved baskets without submitting orders
+6. Generate research reports
+
+This is not the default reproducibility example and is not an end-to-end live
+trading or historical-performance demonstration.
 """
 
 import asyncio
-from datetime import datetime, timedelta
 
 # Module A: Data, Market State & Storage
 from polyarb.data import (
@@ -24,7 +26,6 @@ from polyarb.data import (
 # Module B: Strategy Template Library
 from polyarb.strategies import (
     create_all_no_strategy,
-    create_balanced_strategy,
     StrategyRegistry,
 )
 
@@ -33,7 +34,6 @@ from polyarb.embeddings import (
     EventEmbedder,
     VectorStore,
     EventClusterer,
-    DependencyDetector,
 )
 
 # Module D: Enhanced Arbitrage Scanner
@@ -62,7 +62,7 @@ async def main():
     """Main demonstration function."""
     
     print("=" * 70)
-    print("Polymarket Enhanced Arbitrage System - Comprehensive Demo")
+    print("Polymarket Enhanced Research Modules - Experimental Demo")
     print("=" * 70)
     print()
     
@@ -71,7 +71,7 @@ async def main():
     # =================================================================
     print("Step 1: Initializing data layer...")
     
-    # Use in-memory SQLite for demo (use PostgreSQL in production)
+    # Use in-memory SQLite; the optional PostgreSQL path is not validated here.
     db = Database(database_url=None, echo=False)
     db.initialize()
     
@@ -86,13 +86,13 @@ async def main():
         )
     
     print("✓ Database initialized")
-    print("✓ CLOB client ready")
+    print("✓ CLOB data client constructed; no request made")
     print()
     
     # =================================================================
-    # STEP 2: Fetch and Store Market Data
+    # STEP 2: Establish the explicit empty-data boundary
     # =================================================================
-    print("Step 2: Fetching market data...")
+    print("Step 2: Using no market dataset...")
     
     events_data: list[dict] = []
     events: list = []
@@ -112,7 +112,7 @@ async def main():
     # Example 1: all_no strategy (mutually exclusive outcomes)
     if len(outcomes) >= 3:
         all_no_strategy = create_all_no_strategy(
-            name="Election Outcomes Dutch-Book",
+            name="Declared election-outcome basket",
             subtitle="Buy NO on all mutually exclusive election outcomes",
             positions=[
                 {
@@ -127,10 +127,10 @@ async def main():
                 for i, outcome in enumerate(outcomes[:3])
             ],
             topic="politics",
-            tags=["election", "pure_arb"]
+            tags=["election", "declared_complete_payoff_model"]
         )
         registry.add(all_no_strategy)
-        print(f"✓ Created all_no strategy: {all_no_strategy.name}")
+        print(f"✓ Created an unvalidated strategy template: {all_no_strategy.name}")
     
     print(f"✓ Registry contains {registry.count()} strategies")
     print()
@@ -140,10 +140,8 @@ async def main():
     # =================================================================
     print("Step 4: Embedding and clustering events...")
     
-    # Initialize embedder
-    embedder = EventEmbedder()
-    
     if events_data:
+        embedder = EventEmbedder()
         # Embed events
         embeddings = embedder.embed_events_batch(
             events_data,
@@ -183,9 +181,9 @@ async def main():
     print()
     
     # =================================================================
-    # STEP 5: Scan for Arbitrage Opportunities
+    # STEP 5: Scan for model-implied research candidates
     # =================================================================
-    print("Step 5: Scanning for arbitrage opportunities...")
+    print("Step 5: Scanning for model-implied research candidates...")
     
     # Initialize scanners
     single_scanner = SingleConditionScanner(
@@ -225,16 +223,16 @@ async def main():
     
     # Scan for opportunities
     single_results = await single_scanner.scan(markets_for_scan[:5])
-    print(f"✓ Single-condition scan: {single_results.get_opportunity_count()} opportunities")
+    print(f"✓ Single-condition scan: {single_results.get_opportunity_count()} candidates")
     
     negrisk_results = await negrisk_scanner.scan(markets_for_scan)
-    print(f"✓ NegRisk scan: {negrisk_results.get_opportunity_count()} opportunities")
+    print(f"✓ NegRisk scan: {negrisk_results.get_opportunity_count()} candidates")
     
     if registry.count() > 0:
         strategy_results = await strategy_scanner.scan_strategies(
             registry.get_all()
         )
-        print(f"✓ Strategy scan: {strategy_results.get_opportunity_count()} opportunities")
+        print(f"✓ Strategy scan: {strategy_results.get_opportunity_count()} candidates")
     
     print()
     
@@ -262,13 +260,13 @@ async def main():
     # Check each opportunity against risk limits
     approved_opportunities = []
     for opp in all_opportunities:
-        passed, violations = risk_manager.check_opportunity(opp, proposed_size=1.0)
+        passed, violations = risk_manager.approve_opportunity(opp, proposed_size=1.0)
         if passed:
             approved_opportunities.append(opp)
         else:
             print(f"  Rejected: {opp.name[:40]} - {violations[0]}")
     
-    print(f"✓ Approved {len(approved_opportunities)}/{len(all_opportunities)} opportunities")
+    print(f"✓ Approved {len(approved_opportunities)}/{len(all_opportunities)} for simulation")
     print()
     
     # =================================================================
@@ -289,9 +287,9 @@ async def main():
     print()
     
     # =================================================================
-    # STEP 8: Execute Opportunities (Simulated)
+    # STEP 8: Simulate Approved Opportunities
     # =================================================================
-    print("Step 8: Executing opportunities (simulated)...")
+    print("Step 8: Simulating approved opportunities (no order submission)...")
     
     executor = BasketExecutor(
         max_slippage_bps=50,
@@ -299,7 +297,7 @@ async def main():
     )
     
     executions = []
-    for opp in approved_opportunities[:3]:  # Execute top 3
+    for opp in approved_opportunities[:3]:  # Simulate up to three candidates
         result = await executor.execute_opportunity(
             opp,
             target_size=1.0,
@@ -309,15 +307,15 @@ async def main():
         
         print(f"  {opp.name[:40]}: {result.status.value} ({result.get_fill_rate():.0%} filled)")
     
-    print(f"✓ Executed {len(executions)} opportunities")
+    print(f"✓ Simulated {len(executions)} opportunities")
     print()
     
     # =================================================================
-    # STEP 9: Track Performance and Generate Reports
+    # STEP 9: Track research records and generate reports
     # =================================================================
-    print("Step 9: Tracking performance and generating reports...")
+    print("Step 9: Tracking research records and generating reports...")
     
-    # Track performance
+    # Track research lifecycle and model fields
     tracker = PerformanceTracker()
     
     for opp in all_opportunities:
@@ -333,12 +331,12 @@ async def main():
     # Calculate metrics
     metrics = tracker.calculate_metrics()
     
-    print(f"✓ Performance Metrics:")
-    print(f"  Total Opportunities: {metrics.total_opportunities}")
-    print(f"  Executed: {metrics.executed_opportunities}")
-    print(f"  Success Rate: {metrics.hit_rate:.1%}")
-    print(f"  Avg Profit: {metrics.avg_profit_percentage:.2f}%")
-    print(f"  Total Theoretical Profit: ${metrics.total_theoretical_profit:.2f}")
+    print("✓ Research Metrics:")
+    print(f"  Total candidates: {metrics.total_opportunities}")
+    print(f"  Submitted orders: {metrics.submitted_executions}")
+    print(f"  Simulations: {metrics.simulated_executions}")
+    print(f"  Avg model-implied edge: {metrics.avg_profit_percentage:.2f}%")
+    print(f"  Total model-implied edge: ${metrics.total_model_implied_edge:.2f}")
     print()
     
     # Generate reports
@@ -349,12 +347,12 @@ async def main():
     
     html_path = report_gen.generate_opportunities_html(
         all_opportunities,
-        title="Demo Arbitrage Opportunities"
+        title="Experimental Research Candidates"
     )
     print(f"✓ Generated HTML report: {html_path}")
     
     perf_path = report_gen.generate_performance_report(metrics)
-    print(f"✓ Generated performance report: {perf_path}")
+    print(f"✓ Generated research-metrics report: {perf_path}")
     print()
     
     # =================================================================
@@ -367,19 +365,12 @@ async def main():
     print("Summary:")
     print(f"  - Processed {len(markets)} markets from {len(events)} events")
     print(f"  - Created {registry.count()} strategy templates")
-    print(f"  - Discovered {len(all_opportunities)} arbitrage opportunities")
-    print(f"  - Approved {len(approved_opportunities)} for execution")
-    print(f"  - Executed {len(executions)} opportunities")
-    print(f"  - Generated 3 reports in ./demo_reports/")
+    print(f"  - Detected {len(all_opportunities)} model-implied candidates")
+    print(f"  - Approved {len(approved_opportunities)} for simulation")
+    print(f"  - Simulated {len(executions)} approved opportunities")
+    print("  - Generated 3 reports in ./demo_reports/")
     print()
-    print("The system is ready for production use with:")
-    print("  ✓ Real-time market data ingestion")
-    print("  ✓ Multi-type arbitrage scanning")
-    print("  ✓ Comprehensive risk management")
-    print("  ✓ Execution tracking and reporting")
-    
     # Cleanup
-    await gamma_client.close()
     await clob_client.close()
 
 

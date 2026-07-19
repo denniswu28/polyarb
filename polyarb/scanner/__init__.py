@@ -1,7 +1,7 @@
 """
 Enhanced Arbitrage Scanner Module.
 
-This module provides comprehensive arbitrage scanning capabilities including:
+This module provides research-scanning surfaces including:
 - Single-condition YES/NO arbitrage
 - Within-market rebalancing for NegRisk markets
 - Combinatorial inter-market arbitrage
