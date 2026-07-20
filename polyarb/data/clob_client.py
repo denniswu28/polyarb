@@ -8,12 +8,10 @@ Docs: https://docs.polymarket.com/api-reference/clob-api
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
 from decimal import Decimal
-import importlib
-import inspect
 import httpx
 import asyncio
 
-from polyarb.data.models import OrderBookSnapshot, PriceType
+from polyarb.data.models import OrderBookSnapshot
 
 
 class CLOBClient:
@@ -28,29 +26,30 @@ class CLOBClient:
         base_url: Optional[str] = None,
         timeout: int = 10,
         max_retries: int = 3,
-        use_py_clob_client: bool = True,
+        use_py_clob_client: bool = False,
         py_clob_client_kwargs: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize CLOB API client.
         
         Args:
-            base_url: Base URL for CLOB API (defaults to production)
+            base_url: Base URL for the public CLOB data API
             timeout: Request timeout in seconds
             max_retries: Maximum number of retries for failed requests
+            use_py_clob_client: Retained only to fail closed for the removed,
+                archived client integration
+            py_clob_client_kwargs: Unsupported legacy client arguments
         """
+        if use_py_clob_client or py_clob_client_kwargs:
+            raise NotImplementedError(
+                "The archived py-clob-client integration was removed. "
+                "CLOBClient supports unauthenticated read-only HTTP requests only."
+            )
         self.base_url = base_url or self.BASE_URL
         self.timeout = timeout
         self.max_retries = max_retries
         self.client = httpx.AsyncClient(timeout=timeout)
 
-        # Optional official client for REST endpoints
-        self._py_clob_client = None
-        if use_py_clob_client:
-            self._py_clob_client = self._init_py_clob_client(
-                py_clob_client_kwargs or {}
-            )
-        
         # Cache for last trade prices with TTL
         self._live_price_cache: Dict[str, Tuple[float, datetime]] = {}
         self._cache_ttl = timedelta(seconds=60)
@@ -74,13 +73,6 @@ class CLOBClient:
         Returns:
             Orderbook data or None if not available
         """
-        # Prefer py-clob-client if available
-        py_kwargs = {"side": side} if side else {}
-        orderbook = await self._call_py_clob("get_book", token_id, **py_kwargs)
-        normalized = self._normalize_orderbook(orderbook, side=side)
-        if normalized is not None:
-            return normalized
-
         url = f"{self.base_url}/book"
         params = {"token_id": token_id}
         if side:
@@ -109,22 +101,16 @@ class CLOBClient:
             if datetime.utcnow() - timestamp < self._cache_ttl:
                 return price
 
-        trades = await self._call_py_clob("get_trades", market=token_id, limit=1)
-        price = self._extract_trade_price(trades)
-        if price is None:
-            url = f"{self.base_url}/trades"
-            params = {
-                "market": token_id,
-                "limit": 1
-            }
+        price = None
+        url = f"{self.base_url}/last-trade-price"
+        params = {"token_id": token_id}
 
-            try:
-                response = await self.client.get(url, params=params)
-                response.raise_for_status()
-                trades = response.json()
-                price = self._extract_trade_price(trades)
-            except httpx.HTTPError:
-                pass
+        try:
+            response = await self.client.get(url, params=params)
+            response.raise_for_status()
+            price = self._extract_trade_price(response.json())
+        except httpx.HTTPError:
+            pass
 
         if price is not None:
             self._live_price_cache[token_id] = (price, datetime.utcnow())
@@ -153,8 +139,10 @@ class CLOBClient:
         if not bids or not asks:
             return None
         
-        best_bid = float(bids[0]["price"])
-        best_ask = float(asks[0]["price"])
+        best_bid_level = max(bids, key=lambda level: float(level["price"]))
+        best_ask_level = min(asks, key=lambda level: float(level["price"]))
+        best_bid = float(best_bid_level["price"])
+        best_ask = float(best_ask_level["price"])
         
         if best_bid <= 0 or best_ask <= 0:
             return None
@@ -168,7 +156,9 @@ class CLOBClient:
             "best_ask": best_ask,
             "spread": spread,
             "spread_bps": spread_bps,
-            "mid_price": mid_price
+            "mid_price": mid_price,
+            "best_bid_size": float(best_bid_level["size"]),
+            "best_ask_size": float(best_ask_level["size"]),
         }
     
     def parse_orderbook_snapshot(
@@ -193,14 +183,16 @@ class CLOBClient:
         best_bid = None
         best_bid_size = None
         if bids:
-            best_bid = Decimal(str(bids[0]["price"]))
-            best_bid_size = Decimal(str(bids[0]["size"]))
+            best_bid_level = max(bids, key=lambda level: Decimal(str(level["price"])))
+            best_bid = Decimal(str(best_bid_level["price"]))
+            best_bid_size = Decimal(str(best_bid_level["size"]))
         
         best_ask = None
         best_ask_size = None
         if asks:
-            best_ask = Decimal(str(asks[0]["price"]))
-            best_ask_size = Decimal(str(asks[0]["size"]))
+            best_ask_level = min(asks, key=lambda level: Decimal(str(level["price"])))
+            best_ask = Decimal(str(best_ask_level["price"]))
+            best_ask_size = Decimal(str(best_ask_level["size"]))
         
         # Calculate mid price and spread
         mid_price = None
@@ -259,10 +251,9 @@ class CLOBClient:
     def _normalize_orderbook(orderbook: Any, side: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Ensure orderbook payloads share a consistent shape.
 
-        Handles payloads from both the HTTP endpoint ("buys"/"sells") and
-        py-clob-client objects ("bids"/"asks" attributes). When a side-specific
-        query returns a single list of levels, the payload is assigned to the
-        appropriate bids/asks bucket using the provided ``side`` hint.
+        Handles dictionary and attribute payloads with ``bids``/``asks`` or
+        ``buys``/``sells`` fields. When a side-specific query returns a single
+        list of levels, the payload is assigned using the provided ``side`` hint.
         """
         if not orderbook:
             return None
@@ -307,58 +298,30 @@ class CLOBClient:
 
             return normalized_levels
 
-        return {
-            "bids": _normalize_levels(bids),
-            "asks": _normalize_levels(asks)
-        }
-
-    def _init_py_clob_client(self, kwargs: Dict[str, Any]):
-        """Attempt to initialize py-clob-client if available."""
-        candidate_modules = [
-            "py_clob_client.client",
-            "py_clob_client.async_client",
-            "py_clob_client.rest_client",
-        ]
-
-        for module_name in candidate_modules:
-            try:
-                module = importlib.import_module(module_name)
-                client_cls = getattr(module, "AsyncRestClient", None)
-                if client_cls is None:
-                    continue
-                return client_cls(base_url=self.base_url, timeout=self.timeout, **kwargs)
-            except ImportError:
-                continue
-            except Exception:
-                # If initialization fails, fall back to HTTPX
-                continue
-
-        return None
-
-    async def _call_py_clob(self, method_name: str, *args, **kwargs):
-        """Call a py-clob-client method if available."""
-        if not self._py_clob_client:
-            return None
-
-        method = getattr(self._py_clob_client, method_name, None)
-        if not method:
-            return None
-
-        try:
-            result = method(*args, **kwargs)
-            if inspect.isawaitable(result):
-                return await result
-            return result
-        except Exception:
-            return None
+        normalized_bids = sorted(
+            _normalize_levels(bids),
+            key=lambda level: float(level["price"]),
+            reverse=True,
+        )
+        normalized_asks = sorted(
+            _normalize_levels(asks),
+            key=lambda level: float(level["price"]),
+        )
+        return {"bids": normalized_bids, "asks": normalized_asks}
 
     @staticmethod
     def _extract_trade_price(trades: Any) -> Optional[float]:
-        """Extract a price float from trades payloads."""
+        """Extract a price from the public last-trade response or legacy payloads."""
         if not trades:
             return None
 
-        # py-clob-client may return a dict with a "trades" key
+        if isinstance(trades, dict) and "price" in trades:
+            try:
+                return float(trades["price"])
+            except (TypeError, ValueError):
+                return None
+
+        # Public endpoints may wrap the trade list in "trades" or "data".
         if isinstance(trades, dict) and "trades" in trades:
             trades_list = trades.get("trades") or []
         elif isinstance(trades, dict) and "data" in trades and isinstance(trades["data"], dict):

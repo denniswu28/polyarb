@@ -1,87 +1,43 @@
-"""
-Example usage of the polyarb arbitrage engine.
+"""Opt-in inspection of public Polymarket Gamma reference data.
 
-This script demonstrates how to use the arbitrage engine to find opportunities
-on Polymarket and potentially other platforms.
+This example contacts a public endpoint without credentials. Gamma display
+prices are reference values, not executable bid/ask quotes, so the example
+intentionally does not feed them to the arbitrage engine.
 """
 
-from polyarb import ArbitrageEngine
 from polyarb.platforms.polymarket import PolymarketPlatform
-from polyarb.config import Config
 
 
 def main():
-    """Main example function."""
+    """Fetch and label a small public Gamma reference-data sample."""
     print("=" * 60)
-    print("Polyarb - Arbitrage Detection Engine")
+    print("Polyarb - opt-in Polymarket reference-data inspection")
     print("=" * 60)
     print()
-    
-    # Load configuration
-    config = Config()
-    
-    # Initialize platforms
-    print("Initializing platforms...")
-    polymarket = PolymarketPlatform(
-        api_key=config.get("polymarket_api_key")
-    )
-    print(f"✓ {polymarket.platform_name} initialized")
+
+    print("Preparing credential-free public-data client...")
+    polymarket = PolymarketPlatform()
+    print(f"- {polymarket.platform_name} client prepared")
     print()
-    
-    # Create arbitrage engine
-    engine = ArbitrageEngine(
-        platforms=[polymarket],
-        min_profit_threshold=config.get("min_profit_threshold", 1.0),
-        max_total_price_threshold=config.get("max_total_price_threshold", 0.98)
-    )
-    
-    print("Searching for arbitrage opportunities...")
+
+    print("Fetching Gamma display/reference prices...")
     print("-" * 60)
-    print()
-    
-    # Find opportunities
+
     try:
-        opportunities = engine.find_opportunities()
+        markets = polymarket.get_markets(limit=25)
     except Exception as exc:
-        print("Arbitrage scan failed due to an unexpected error.")
-        print(f"  • Details: {exc}")
+        print("Public-data request failed due to an unexpected error.")
+        print(f"  - Details: {exc}")
         raise
-    
-    if not opportunities:
-        print("No arbitrage opportunities found at this time.")
-        print()
-        print("This could mean:")
-        print("  • Markets are efficiently priced")
-        print("  • No markets meet the profit threshold")
-        print("  • API returned no data (check connection)")
-        return
-    
-    # Display opportunities
-    print(f"Found {len(opportunities)} arbitrage opportunity(ies):\n")
-    
-    for i, opp in enumerate(opportunities, 1):
-        print(f"Opportunity #{i}")
-        print(f"  Type: {opp.opportunity_type.value}")
-        print(f"  Platform(s): {', '.join(opp.platforms)}")
-        print(f"  Expected Profit: {opp.profit_percentage:.2f}%")
-        print(f"  Confidence: {opp.confidence:.0%}")
-        print(f"  Description: {opp.description}")
-        print(f"  Strategy: {opp.strategy.get('action', 'N/A')}")
-        
-        if opp.strategy.get("positions"):
-            print(f"  Positions:")
-            for outcome, price in opp.strategy["positions"].items():
-                print(f"    • {outcome}: ${price:.4f}")
-        
-        if opp.strategy.get("total_cost"):
-            print(f"  Total Cost: ${opp.strategy['total_cost']:.4f}")
-            print(f"  Guaranteed Return: ${opp.strategy.get('guaranteed_return', 0):.4f}")
-            print(f"  Net Profit: ${opp.strategy.get('net_profit', 0):.4f}")
-        
-        print()
-    
+
+    print(f"Fetched {len(markets)} market record(s).")
+    for market in markets[:5]:
+        print(f"  - {market.question}: {market.prices}")
+
+    print()
     print("=" * 60)
-    print("Analysis complete!")
+    print("Inspection complete. No candidate calculation or order action was performed.")
+    print("Use CLOB asks for buys and CLOB bids for sells in executable-price analysis.")
     print("=" * 60)
 
 

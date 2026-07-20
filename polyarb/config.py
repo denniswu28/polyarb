@@ -28,7 +28,6 @@ class Config:
         """Load configuration from environment variables."""
         return {
             # Platform API keys
-            "polymarket_api_key": os.getenv("POLYMARKET_API_KEY"),
             "predictit_api_key": os.getenv("PREDICTIT_API_KEY"),
             "kalshi_api_key": os.getenv("KALSHI_API_KEY"),
             
@@ -36,6 +35,8 @@ class Config:
             "min_profit_threshold": float(os.getenv("MIN_PROFIT_THRESHOLD", "1.0")),
             "max_total_price_threshold": float(os.getenv("MAX_TOTAL_PRICE_THRESHOLD", "0.98")),
             "refresh_interval": int(os.getenv("REFRESH_INTERVAL", "60")),
+            "fee_rate_bps": float(os.getenv("FEE_RATE_BPS", "0")),
+            "slippage_bps": float(os.getenv("SLIPPAGE_BPS", "0")),
             
             # Feature flags
             "enable_cross_platform": os.getenv("ENABLE_CROSS_PLATFORM", "true").lower() == "true",

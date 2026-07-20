@@ -129,10 +129,10 @@ class StrategyRegistry:
     
     def get_pure_arbitrage_strategies(self) -> List[Strategy]:
         """
-        Get all pure arbitrage strategies (no residual risk).
+        Get strategies tagged PURE_LOGICAL in their declared scenario model.
         
         Returns:
-            List of pure arbitrage strategies
+            List of strategies with that model tag; no external validation is implied
         """
         return self.filter_by_type(StrategyType.PURE_LOGICAL)
     

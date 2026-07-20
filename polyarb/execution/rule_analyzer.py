@@ -18,7 +18,8 @@ class RuleRiskAnalyzer:
     """
     Analyzes market rules for resolution risk using LLM.
     
-    Note: This is a framework class. In production, integrate with actual LLM API.
+    Placeholder only. Any future LLM integration requires separate implementation,
+    data-handling review, and validation.
     """
     
     def __init__(self, llm_client: Optional[Any] = None):
@@ -151,7 +152,7 @@ class RuleRiskAnalyzer:
         rules = market.get("rules", "")
         question = market.get("question", "")
         
-        prompt = f"""
+        _prompt = f"""
 Analyze the following prediction market for resolution risk:
 
 Question: {question}

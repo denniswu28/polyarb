@@ -8,10 +8,10 @@ using SQLAlchemy ORM for PostgreSQL storage.
 from enum import Enum
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from sqlalchemy import (
     Column, String, DateTime, Numeric, Integer, Boolean, 
-    ForeignKey, JSON, Text, Enum as SQLEnum, Index
+    ForeignKey, Text, Index
 )
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.dialects.postgresql import JSONB

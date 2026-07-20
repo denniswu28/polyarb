@@ -1,8 +1,4 @@
-"""
-PredictIt platform integration (placeholder).
-
-This module will provide integration with the PredictIt prediction market platform.
-"""
+"""Fail-closed PredictIt placeholder; no integration behavior is implemented."""
 
 from typing import List, Optional
 
@@ -10,7 +6,7 @@ from polyarb.platforms.base import PlatformInterface, Market
 
 
 class PredictItPlatform(PlatformInterface):
-    """Integration with PredictIt prediction market platform (to be implemented)."""
+    """Fail-closed placeholder; PredictIt behavior is not implemented or validated."""
     
     def __init__(self, api_key: Optional[str] = None, **kwargs):
         """
@@ -21,7 +17,7 @@ class PredictItPlatform(PlatformInterface):
             **kwargs: Additional configuration
         """
         super().__init__(api_key, **kwargs)
-        # TODO: Initialize PredictIt API client
+        # No client is initialized; methods below fail closed.
     
     @property
     def platform_name(self) -> str:
@@ -38,9 +34,9 @@ class PredictItPlatform(PlatformInterface):
         Returns:
             List of Market objects
         """
-        # TODO: Implement PredictIt API integration
-        print(f"PredictIt integration not yet implemented")
-        return []
+        raise NotImplementedError(
+            "PredictIt integration is not implemented or validated."
+        )
     
     def get_market(self, market_id: str) -> Optional[Market]:
         """
@@ -52,6 +48,12 @@ class PredictItPlatform(PlatformInterface):
         Returns:
             Market object if found, None otherwise
         """
-        # TODO: Implement PredictIt API integration
-        print(f"PredictIt integration not yet implemented")
-        return None
+        raise NotImplementedError(
+            "PredictIt integration is not implemented or validated."
+        )
+
+    def initialize(self) -> bool:
+        """Fail closed instead of reporting a successful connection."""
+        raise NotImplementedError(
+            "PredictIt integration is not implemented or validated."
+        )

@@ -1,9 +1,9 @@
 """
-Scanner for single-condition YES/NO arbitrage opportunities.
+Scanner for conditional single-condition YES/NO basket candidates.
 """
 
 import uuid
-from typing import List, Dict, Any
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 
 from polyarb.scanner.base_scanner import BaseScanner, ScanResult
@@ -20,7 +20,9 @@ class SingleConditionScanner(BaseScanner):
     """
     Scans for single-condition YES/NO arbitrage (Dutch-book).
     
-    When price(YES) + price(NO) < 1, buying both guarantees profit.
+    If YES and NO are exhaustive, use compatible resolution rules, and can be
+    bought at the modeled ASK costs, a basket below its modeled payoff is a
+    candidate edge. The scanner does not establish those external conditions.
     """
     
     async def scan(
@@ -42,6 +44,7 @@ class SingleConditionScanner(BaseScanner):
         """
         start_time = datetime.utcnow()
         price_type = price_type or self.price_type
+        self.require_buy_price_type(price_type)
         opportunities = []
         
         for market in markets:
@@ -99,71 +102,42 @@ class SingleConditionScanner(BaseScanner):
         if not yes_token_id or not no_token_id:
             return None
         
-        price_candidates: list[tuple[PriceType, float, float]] = []
-
-        # Respect requested price type when it explicitly demands bid/ask
-        candidate_types = [PriceType.ASK, PriceType.BID]
-        if price_type in (PriceType.ASK, PriceType.BID):
-            candidate_types = [price_type]
-
-        if PriceType.ASK in candidate_types:
-            # Fetch ASK prices (cost to buy both sides)
-            yes_ask = await self.price_accessor.get_price(
-                yes_token_id,
-                PriceType.ASK,
-                side="buy"
+        yes_price = await self.price_accessor.get_price(
+            yes_token_id, PriceType.ASK, side="buy"
+        )
+        no_price = await self.price_accessor.get_price(
+            no_token_id, PriceType.ASK, side="buy"
+        )
+        if yes_price is None or no_price is None:
+            return None
+        try:
+            yes_price = self._finite_float(yes_price, "YES ask price")
+            no_price = self._finite_float(no_price, "NO ask price")
+            total_price_threshold = self._finite_float(
+                self.max_total_price_threshold,
+                "max_total_price_threshold",
             )
-
-            no_ask = await self.price_accessor.get_price(
-                no_token_id,
-                PriceType.ASK,
-                side="buy"
-            )
-
-            if yes_ask is not None and no_ask is not None:
-                price_candidates.append((PriceType.ASK, yes_ask, no_ask))
-
-        if PriceType.BID in candidate_types:
-            # Fetch BID prices (potential to sell both sides)
-            yes_bid = await self.price_accessor.get_price(
-                yes_token_id,
-                PriceType.BID,
-                side="sell"
-            )
-
-            no_bid = await self.price_accessor.get_price(
-                no_token_id,
-                PriceType.BID,
-                side="sell"
-            )
-
-            if yes_bid is not None and no_bid is not None:
-                price_candidates.append((PriceType.BID, yes_bid, no_bid))
-
-        # Only consider opportunities that use consistent bid/ask prices
-        valid_candidates: list[tuple[PriceType, float, float, float]] = [
-            (ptype, y_price, n_price, y_price + n_price)
-            for ptype, y_price, n_price in price_candidates
-            if (y_price + n_price) < self.max_total_price_threshold
-        ]
-
-        if not valid_candidates:
+        except ValueError:
+            return None
+        if not 0 < yes_price <= 1 or not 0 < no_price <= 1:
             return None
 
-        # Choose the cheapest viable pairing (ask or bid)
-        selected_type, yes_price, no_price, total_cost = min(
-            valid_candidates,
-            key=lambda candidate: candidate[3]
-        )
+        total_cost = yes_price + no_price
+        if total_cost >= total_price_threshold:
+            return None
         
-        # Calculate profit metrics
+        # Calculate model-implied edge using backward-compatible field names.
         metrics = self.calculate_profit_metrics(
             total_cost=total_cost,
-            worst_case_payoff=1.0,  # Always pays 1
-            best_case_payoff=1.0
+            worst_case_payoff=1.0,  # Modeled only if the outcomes cover resolution.
+            best_case_payoff=1.0,
+            fee_rate_bps=self.fee_rate_bps,
+            slippage_bps=self.slippage_bps,
         )
         
-        if not self.is_opportunity_valid(metrics["profit_percentage"], total_cost):
+        if not self.is_opportunity_valid(
+            metrics["profit_percentage"], metrics["effective_cost"]
+        ):
             return None
         
         # Create legs
@@ -175,7 +149,7 @@ class SingleConditionScanner(BaseScanner):
                 market_id=market.get("id"),
                 market_question=market.get("question", ""),
                 price=yes_price,
-                price_type=selected_type.value,
+                price_type=PriceType.ASK.value,
             ),
             Leg(
                 token_id=no_token_id,
@@ -184,7 +158,7 @@ class SingleConditionScanner(BaseScanner):
                 market_id=market.get("id"),
                 market_question=market.get("question", ""),
                 price=no_price,
-                price_type=selected_type.value,
+                price_type=PriceType.ASK.value,
             )
         ]
         
@@ -193,25 +167,25 @@ class SingleConditionScanner(BaseScanner):
             spread_data = await self.price_accessor.clob_client.fetch_spread(leg.token_id)
             if spread_data:
                 leg.spread_bps = spread_data.get("spread_bps")
-                leg.depth = spread_data.get("best_ask_size", 0) + spread_data.get("best_bid_size", 0)
+                leg.depth = spread_data.get("best_ask_size")
         
         # Apply spread adjustment
-        adjusted_cost = self.apply_spread_adjustment(total_cost, legs)
+        adjusted_cost = self.apply_spread_adjustment(metrics["effective_cost"], legs)
         adjusted_profit = 1.0 - adjusted_cost
         adjusted_profit_pct = (adjusted_profit / adjusted_cost * 100) if adjusted_cost > 0 else 0
         
         # Estimate liquidity
         liquidity_score = self.estimate_liquidity_score(legs)
-        max_size = min(leg.depth for leg in legs if leg.depth) if any(leg.depth for leg in legs) else None
+        max_size = self.get_max_size(legs)
         
         # Create opportunity
         opportunity = EnhancedOpportunity(
             id=str(uuid.uuid4()),
             opportunity_class=OpportunityClass.SINGLE_CONDITION,
-            name=f"YES/NO Arbitrage: {market.get('question', '')[:50]}",
+            name=f"YES/NO basket candidate: {market.get('question', '')[:50]}",
             description=(
-                f"Use {selected_type.value.upper()} prices: YES at {yes_price:.4f} "
-                f"and NO at {no_price:.4f} for guaranteed profit"
+                f"ASK-cost model: YES at {yes_price:.4f} and NO at {no_price:.4f}; "
+                "the payoff edge is conditional on contract coverage and resolution."
             ),
             legs=legs,
             total_cost=total_cost,
@@ -222,12 +196,12 @@ class SingleConditionScanner(BaseScanner):
             adjusted_cost=adjusted_cost,
             adjusted_profit=adjusted_profit,
             adjusted_profit_percentage=adjusted_profit_pct,
-            risk_level=RiskLevel.LOW,
+            risk_level=RiskLevel.MEDIUM,
             max_size=max_size,
             liquidity_score=liquidity_score,
             market_ids=[market.get("id")],
             event_ids=[market.get("event_id")] if market.get("event_id") else [],
-            is_pure_arbitrage=True,
+            is_pure_arbitrage=False,
             topic=market.get("topic"),
         )
         

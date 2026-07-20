@@ -17,7 +17,7 @@ class StrategyMethod(str, Enum):
 
 class StrategyType(str, Enum):
     """Strategy classification."""
-    PURE_LOGICAL = "pure_logical"  # Pure arbitrage, all paths profitable
+    PURE_LOGICAL = "pure_logical"  # Modeled payoff covers cost in every declared scenario.
     HIGH_PROB_HEDGE = "high_prob_hedge"  # Small residual risk
     DIRECTIONAL = "directional"  # Speculative, not arbitrage
 
@@ -54,10 +54,10 @@ class LogicalSpec:
     """
     description: str  # Human-readable explanation
     scenarios: List[Dict[str, Any]]  # List of outcome scenarios
-    worst_case_payoff: float  # Minimum guaranteed payoff
+    worst_case_payoff: float  # Minimum payoff assumed by the declared scenario model
     best_case_payoff: float  # Maximum possible payoff
     
-    # For pure arbitrage, worst_case_payoff should be >= investment
+    # In a declared complete-payoff model, worst_case_payoff should cover investment.
     # For hedges, worst_case_payoff may be < investment (residual risk)
 
 
@@ -111,7 +111,7 @@ class Strategy:
         return list(set(pos.event_id for pos in self.get_all_positions()))
     
     def is_pure_arbitrage(self) -> bool:
-        """Check if this is pure arbitrage (no residual risk)."""
+        """Return whether the declared scenario model is tagged PURE_LOGICAL."""
         return self.strategy_type == StrategyType.PURE_LOGICAL
     
     def __str__(self) -> str:

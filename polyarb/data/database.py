@@ -4,7 +4,7 @@ Database connection and session management.
 
 from typing import Optional
 from contextlib import contextmanager
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
@@ -27,8 +27,8 @@ class Database:
         Initialize database connection.
         
         Args:
-            database_url: PostgreSQL connection URL (e.g., 'postgresql://user:pass@host:port/db')
-                         If None, uses in-memory SQLite for testing
+            database_url: PostgreSQL connection URL supplied by the caller. Do not commit
+                         embedded credentials. If None, uses in-memory SQLite for testing.
             echo: Whether to log SQL statements
             pool_size: Connection pool size
             max_overflow: Max overflow connections

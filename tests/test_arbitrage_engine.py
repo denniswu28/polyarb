@@ -3,6 +3,7 @@ Tests for the arbitrage engine core functionality.
 """
 
 import pytest
+
 from polyarb.core.arbitrage_engine import ArbitrageEngine
 from polyarb.core.opportunity import ArbitrageOpportunity, OpportunityType
 from polyarb.platforms.base import PlatformInterface, Market
@@ -32,12 +33,43 @@ class MockPlatform(PlatformInterface):
         return None
 
 
+def executable_quotes(asks, bids=None):
+    """Build explicit synthetic order-book metadata for engine tests."""
+    return {
+        "price_semantics": "executable",
+        "asks": dict(asks),
+        "bids": dict(bids if bids is not None else asks),
+    }
+
+
 def test_arbitrage_engine_initialization():
     """Test that the arbitrage engine initializes correctly."""
     engine = ArbitrageEngine()
     assert engine is not None
     assert len(engine.platforms) == 0
     assert engine.min_profit_threshold == 1.0
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(float("nan"), id="nan"),
+        pytest.param(float("inf"), id="positive-infinity"),
+        pytest.param(float("-inf"), id="negative-infinity"),
+    ],
+)
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "min_profit_threshold",
+        "max_total_price_threshold",
+        "fee_rate_bps",
+        "slippage_bps",
+    ],
+)
+def test_arbitrage_engine_rejects_nonfinite_limits(field_name, value):
+    with pytest.raises(ValueError, match="finite"):
+        ArbitrageEngine(**{field_name: value})
 
 
 def test_add_platform():
@@ -68,7 +100,8 @@ def test_intra_platform_arbitrage_detection():
         platform="MockPlatform",
         question="Will it rain?",
         outcomes=["Yes", "No"],
-        prices={"Yes": 0.45, "No": 0.50}  # Total: 0.95
+        prices={"Yes": 0.45, "No": 0.50},
+        metadata=executable_quotes({"Yes": 0.45, "No": 0.50}),
     )
     
     platform = MockPlatform(markets=[market])
@@ -85,6 +118,44 @@ def test_intra_platform_arbitrage_detection():
     assert opp.profit_percentage > 0
 
 
+def test_reference_display_prices_are_not_executable_inputs():
+    market = Market(
+        id="reference-only",
+        platform="MockPlatform",
+        question="Reference-only display market?",
+        outcomes=["Yes", "No"],
+        prices={"Yes": 0.40, "No": 0.40},
+        metadata={
+            "price_semantics": "reference",
+            "price_source": "gamma_display",
+        },
+    )
+    platform = MockPlatform(markets=[market])
+
+    assert ArbitrageEngine(platforms=[platform], min_profit_threshold=0).find_opportunities() == []
+
+
+def test_intra_platform_cost_inputs_can_remove_a_gross_candidate():
+    market = Market(
+        id="cost-sensitive",
+        platform="MockPlatform",
+        question="Cost-sensitive synthetic market?",
+        outcomes=["Yes", "No"],
+        prices={"Yes": 0.49, "No": 0.49},
+        metadata=executable_quotes({"Yes": 0.49, "No": 0.49}),
+    )
+    platform = MockPlatform(markets=[market])
+    engine = ArbitrageEngine(
+        platforms=[platform],
+        min_profit_threshold=0.0,
+        max_total_price_threshold=0.99,
+        fee_rate_bps=100,
+        slippage_bps=100,
+    )
+
+    assert engine.find_opportunities() == []
+
+
 def test_no_arbitrage_when_prices_sum_to_one():
     """Test that no arbitrage is detected when prices sum to 1."""
     market = Market(
@@ -92,7 +163,8 @@ def test_no_arbitrage_when_prices_sum_to_one():
         platform="MockPlatform",
         question="Will it snow?",
         outcomes=["Yes", "No"],
-        prices={"Yes": 0.50, "No": 0.50}  # Total: 1.00
+        prices={"Yes": 0.50, "No": 0.50},
+        metadata=executable_quotes({"Yes": 0.50, "No": 0.50}),
     )
     
     platform = MockPlatform(markets=[market])
@@ -111,6 +183,7 @@ def test_intra_platform_skips_non_positive_totals():
         question="Broken odds?",
         outcomes=["Yes", "No"],
         prices={"Yes": 0.0, "No": 0.0},
+        metadata=executable_quotes({"Yes": 0.0, "No": 0.0}),
     )
 
     platform = MockPlatform(markets=[market])
@@ -159,6 +232,7 @@ def test_cross_platform_skips_non_positive_prices():
         question="Will the thing happen?",
         outcomes=["Yes", "No"],
         prices={"Yes": 0.0, "No": 0.5},
+        metadata=executable_quotes({"Yes": 0.0, "No": 0.5}),
     )
 
     market2 = Market(
@@ -167,6 +241,7 @@ def test_cross_platform_skips_non_positive_prices():
         question="Will the thing happen?",
         outcomes=["Yes", "No"],
         prices={"Yes": 0.1, "No": 0.5},
+        metadata=executable_quotes({"Yes": 0.1, "No": 0.5}),
     )
 
     platform1 = MockPlatform(markets=[market1], name="Platform1")
@@ -192,7 +267,11 @@ def test_cross_platform_arbitrage_detection():
         platform="Platform1",
         question="Will candidate X win?",
         outcomes=["Yes", "No"],
-        prices={"Yes": 0.55, "No": 0.45}
+        prices={"Yes": 0.55, "No": 0.45},
+        metadata=executable_quotes(
+            {"Yes": 0.56, "No": 0.46},
+            {"Yes": 0.54, "No": 0.44},
+        ),
     )
     
     market2 = Market(
@@ -200,7 +279,11 @@ def test_cross_platform_arbitrage_detection():
         platform="Platform2",
         question="Will candidate X win?",  # Same question
         outcomes=["Yes", "No"],
-        prices={"Yes": 0.65, "No": 0.35}  # Higher price for Yes
+        prices={"Yes": 0.65, "No": 0.35},
+        metadata=executable_quotes(
+            {"Yes": 0.66, "No": 0.36},
+            {"Yes": 0.64, "No": 0.34},
+        ),
     )
     
     platform1 = MockPlatform(markets=[market1], name="Platform1")
@@ -220,3 +303,44 @@ def test_cross_platform_arbitrage_detection():
     ]
     
     assert len(cross_platform_opps) > 0
+    yes_candidate = next(
+        candidate
+        for candidate in cross_platform_opps
+        if candidate.strategy["outcome"] == "Yes"
+    )
+    assert yes_candidate.strategy["buy_price"] == 0.56
+    assert yes_candidate.strategy["sell_price"] == 0.64
+    assert yes_candidate.strategy["buy_price_semantics"] == "executable_ask"
+    assert yes_candidate.strategy["sell_price_semantics"] == "executable_bid"
+
+
+def test_cross_platform_candidate_order_is_deterministic():
+    markets = [
+        Market(
+            id="market_1",
+            platform="Platform1",
+            question="Same synthetic event?",
+            outcomes=["Yes", "No"],
+            prices={"Yes": 0.60, "No": 0.40},
+            metadata=executable_quotes(
+                {"Yes": 0.61, "No": 0.41},
+                {"Yes": 0.59, "No": 0.39},
+            ),
+        ),
+        Market(
+            id="market_2",
+            platform="Platform2",
+            question="Same synthetic event?",
+            outcomes=["No", "Yes"],
+            prices={"No": 0.30, "Yes": 0.70},
+            metadata=executable_quotes(
+                {"No": 0.31, "Yes": 0.71},
+                {"No": 0.29, "Yes": 0.69},
+            ),
+        ),
+    ]
+    engine = ArbitrageEngine(min_profit_threshold=0.0)
+
+    candidates = engine._analyze_cross_platform_market_group(markets)
+
+    assert [candidate.strategy["outcome"] for candidate in candidates] == ["No", "Yes"]

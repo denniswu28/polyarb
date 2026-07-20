@@ -3,7 +3,7 @@ Template functions for creating common strategy types.
 """
 
 import uuid
-from typing import List, Optional
+from typing import Dict, List, Optional
 from polyarb.strategies.base import (
     Strategy,
     StrategyMethod,
@@ -69,7 +69,7 @@ def create_all_no_strategy(
         description=(
             f"Buy NO on {n} mutually exclusive outcomes. "
             f"Exactly one outcome occurs, so (n-1) legs win, 1 leg loses. "
-            f"Guaranteed payoff = {n-1} if outcomes are truly mutually exclusive."
+            f"Model-implied payoff = {n-1} if outcomes are truly mutually exclusive."
         ),
         scenarios=[
             {
@@ -112,7 +112,7 @@ def create_balanced_strategy(
     """
     Create a 'balanced' strategy with two complementary position baskets.
     
-    In pure arbitrage: side_a_positions + side_b_positions cover all outcomes
+    In a declared complete-payoff model, both sides assert coverage of all outcomes
     such that at least one leg always pays 1, and at most one loses.
     
     In hedges: almost all realistic scenarios are covered, with small residual risk.
@@ -123,7 +123,7 @@ def create_balanced_strategy(
         side_a_positions: List of position dicts for side A
         side_b_positions: List of position dicts for side B
         strategy_type: PURE_LOGICAL or HIGH_PROB_HEDGE
-        worst_case_payoff: Minimum guaranteed payoff
+        worst_case_payoff: Minimum payoff assumed by the declared scenario model
         best_case_payoff: Maximum possible payoff
         topic: Topic/category
         notes: Additional notes
@@ -175,7 +175,7 @@ def create_balanced_strategy(
         description=(
             f"Balanced strategy with {len(side_a)} positions on side A "
             f"and {len(side_b)} positions on side B. "
-            f"{'Pure arbitrage: ' if strategy_type == StrategyType.PURE_LOGICAL else 'Hedge: '}"
+            f"{'Declared complete-payoff model: ' if strategy_type == StrategyType.PURE_LOGICAL else 'Hedge model: '}"
             f"at least one position wins in all scenarios."
         ),
         scenarios=[],  # To be filled by LLM or scenario analysis
@@ -202,7 +202,7 @@ def create_custom_strategy(
     name: str,
     subtitle: str,
     positions: List[Dict],
-    strategy_type: StrategyType = StrategyType.CUSTOM,
+    strategy_type: StrategyType = StrategyType.DIRECTIONAL,
     logical_spec: Optional[LogicalSpec] = None,
     topic: Optional[str] = None,
     notes: Optional[str] = None,

@@ -6,11 +6,12 @@ from enum import Enum
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
-from decimal import Decimal
+
+from polyarb.core.lifecycle import LifecycleState
 
 
 class OpportunityClass(str, Enum):
-    """Classification of arbitrage opportunities."""
+    """Legacy classification of model-implied research candidates."""
     SINGLE_CONDITION = "single_condition"  # YES+NO Dutch-book
     NEGRISK_REBALANCING = "negrisk_rebalancing"  # Within-market rebalancing
     COMBINATORIAL = "combinatorial"  # Inter-market arbitrage
@@ -19,15 +20,15 @@ class OpportunityClass(str, Enum):
 
 
 class RiskLevel(str, Enum):
-    """Risk assessment for opportunities."""
-    LOW = "low"  # Pure arbitrage, no rule risk
+    """Research risk label; it is not a platform or financial risk rating."""
+    LOW = "low"  # No material issue found within the tested model boundary.
     MEDIUM = "medium"  # Small residual risk or minor rule ambiguity
     HIGH = "high"  # Significant rule risk or execution complexity
 
 
 @dataclass
 class Leg:
-    """Represents a single leg in an arbitrage opportunity."""
+    """Represents one modeled leg in a research candidate."""
     
     token_id: str
     side: str  # 'YES' or 'NO'
@@ -51,7 +52,7 @@ class Leg:
 @dataclass
 class EnhancedOpportunity:
     """
-    Enhanced arbitrage opportunity with comprehensive metadata.
+    Research opportunity with scanner metadata and an explicit lifecycle state.
     """
     
     # Identification
@@ -79,7 +80,7 @@ class EnhancedOpportunity:
     adjusted_profit_percentage: Optional[float] = None
     
     # Risk assessment
-    risk_level: RiskLevel = RiskLevel.LOW
+    risk_level: RiskLevel = RiskLevel.MEDIUM
     rule_risk_notes: List[str] = field(default_factory=list)
     
     # Liquidity
@@ -93,18 +94,37 @@ class EnhancedOpportunity:
     # Metadata
     tags: List[str] = field(default_factory=list)
     topic: Optional[str] = None
-    is_pure_arbitrage: bool = True
+    is_pure_arbitrage: bool = False  # Legacy field; false until external assumptions are verified.
     
     # Timestamps
     discovered_at: datetime = field(default_factory=datetime.utcnow)
     expires_at: Optional[datetime] = None
+    lifecycle_state: LifecycleState = LifecycleState.DETECTED
+    approved_at: Optional[datetime] = None
+    reported_at: Optional[datetime] = None
+
+    def approve(self) -> None:
+        """Record approval state; execution also requires a RiskManager reservation."""
+        self.lifecycle_state = LifecycleState.APPROVED
+        self.approved_at = datetime.utcnow()
+
+    def revoke_approval(self) -> None:
+        """Return an unexecuted approval to detected state."""
+        if self.lifecycle_state == LifecycleState.APPROVED:
+            self.lifecycle_state = LifecycleState.DETECTED
+            self.approved_at = None
+
+    def mark_reported(self) -> None:
+        """Record that the detected opportunity was included in a report."""
+        self.lifecycle_state = LifecycleState.REPORTED
+        self.reported_at = datetime.utcnow()
     
     def get_roi(self) -> float:
-        """Return on investment percentage."""
+        """Backward-compatible alias for the model-implied edge percentage."""
         return self.profit_percentage
     
     def get_adjusted_roi(self) -> Optional[float]:
-        """Adjusted ROI accounting for spreads."""
+        """Backward-compatible alias for spread-adjusted model edge."""
         return self.adjusted_profit_percentage
     
     def get_leg_count(self) -> int:
@@ -120,7 +140,7 @@ class EnhancedOpportunity:
         Check if opportunity meets quality thresholds.
         
         Args:
-            min_profit: Minimum profit percentage
+            min_profit: Minimum model-edge percentage
             min_liquidity: Minimum liquidity
             
         Returns:
@@ -158,11 +178,12 @@ class EnhancedOpportunity:
             "max_size": self.max_size,
             "market_ids": self.market_ids,
             "is_pure_arbitrage": self.is_pure_arbitrage,
+            "lifecycle_state": self.lifecycle_state.value,
             "discovered_at": self.discovered_at.isoformat(),
         }
     
     def __str__(self) -> str:
         return (
             f"EnhancedOpportunity({self.opportunity_class.value}, "
-            f"profit={self.profit_percentage:.2f}%, legs={len(self.legs)})"
+            f"model_edge={self.profit_percentage:.2f}%, legs={len(self.legs)})"
         )

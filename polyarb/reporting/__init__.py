@@ -1,16 +1,22 @@
 """
-Evaluation, Backtesting & Reporting Module.
+Research reporting module.
 
-This module provides performance analytics, backtesting, and report generation.
+The Backtester name is retained for compatibility but fails closed because
+historical replay is not implemented or validated.
 """
 
-from polyarb.reporting.performance_tracker import PerformanceTracker, PerformanceMetrics
+from polyarb.reporting.performance_tracker import (
+    PerformanceMetrics,
+    PerformanceTracker,
+    UnvalidatedLiveExecutionError,
+)
 from polyarb.reporting.report_generator import ReportGenerator
 from polyarb.reporting.backtest import Backtester, BacktestResult
 
 __all__ = [
     "PerformanceTracker",
     "PerformanceMetrics",
+    "UnvalidatedLiveExecutionError",
     "ReportGenerator",
     "Backtester",
     "BacktestResult",

@@ -1,0 +1,13 @@
+[
+  {
+    "id": "event-current-schema",
+    "markets": [
+      {
+        "id": "market-current-schema",
+        "question": "Will the synthetic condition resolve Yes?",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "clobTokenIds": "[\"token-yes\", \"token-no\"]"
+      }
+    ]
+  }
+]

@@ -1,13 +1,16 @@
 """
-Run the SingleEventMultiMarketScanner against live Polymarket data.
+Opt-in research scan against public Polymarket data.
 
 This example fetches active events from the public Polymarket Gamma API, keeps
 markets that expose YES token IDs, and scans them for single-event, multi-market
-arbitrage when an "other" option completes the outcome space.
+model-implied basket edges when an "other" option appears to complete the outcome
+space. It does not validate contract equivalence or resolution rules and does not
+approve, simulate, or submit orders.
 """
 
 import argparse
 import asyncio
+import json
 from typing import Any, Dict, List
 
 import requests
@@ -19,6 +22,47 @@ from polyarb.scanner import SingleEventMultiMarketScanner
 
 
 GAMMA_EVENTS_URL = "https://gamma-api.polymarket.com/events"
+
+
+def _parse_gamma_array(value: Any) -> List[Any]:
+    """Return a Gamma array from either its JSON-string or list representation."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
+    return value if isinstance(value, list) else []
+
+
+def _normalize_outcomes(market: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Pair current Gamma outcome labels with their corresponding CLOB token IDs."""
+    raw_outcomes = _parse_gamma_array(market.get("outcomes"))
+    if not raw_outcomes:
+        return []
+
+    # Retain compatibility with the earlier dictionary representation.
+    if all(isinstance(outcome, dict) for outcome in raw_outcomes):
+        normalized = []
+        for outcome in raw_outcomes:
+            token_id = outcome.get("tokenId") or outcome.get("yesTokenId")
+            if token_id:
+                normalized.append(
+                    {
+                        "label": str(outcome.get("name") or outcome.get("label") or "Yes"),
+                        "yes_token_id": str(token_id),
+                    }
+                )
+        return normalized
+
+    token_ids = _parse_gamma_array(market.get("clobTokenIds"))
+    if len(raw_outcomes) != len(token_ids):
+        return []
+
+    return [
+        {"label": str(label), "yes_token_id": str(token_id)}
+        for label, token_id in zip(raw_outcomes, token_ids)
+        if label is not None and token_id
+    ]
 
 
 def fetch_markets(limit: int = 200) -> List[Dict[str, Any]]:
@@ -43,20 +87,7 @@ def fetch_markets(limit: int = 200) -> List[Dict[str, Any]]:
     for event in events:
         event_id = event.get("id")
         for market in event.get("markets") or []:
-            # Extract YES token IDs from the outcome entries. Gamma responses use
-            # "tokenId" or "yesTokenId" depending on the market type.
-            outcomes = []
-            for outcome in market.get("outcomes") or []:
-                yes_token_id = outcome.get("tokenId") or outcome.get("yesTokenId")
-                if not yes_token_id:
-                    continue
-
-                outcomes.append(
-                    {
-                        "label": outcome.get("name") or outcome.get("label") or "Yes",
-                        "yes_token_id": yes_token_id,
-                    }
-                )
+            outcomes = _normalize_outcomes(market)
 
             if not outcomes:
                 continue
@@ -81,6 +112,8 @@ async def run_scan(limit: int, min_profit: float, max_total_price: float, price_
         min_profit_threshold=min_profit,
         max_total_price_threshold=max_total_price,
         price_type=price_type,
+        fee_rate_bps=10.0,
+        slippage_bps=10.0,
     )
 
     markets = fetch_markets(limit=limit)
@@ -88,7 +121,7 @@ async def run_scan(limit: int, min_profit: float, max_total_price: float, price_
         print("No markets with token IDs were returned from the API.")
         return
 
-    print(f"Scanning {len(markets)} markets for single-event multi-market arbitrage...")
+    print(f"Scanning {len(markets)} markets for conditional model-implied edges...")
     result = await scanner.scan(markets)
     print(f"Scan complete in {result.scan_duration_ms:.0f} ms")
 
@@ -97,12 +130,14 @@ async def run_scan(limit: int, min_profit: float, max_total_price: float, price_
     else:
         for idx, opp in enumerate(result.opportunities, start=1):
             print()
-            print(f"Opportunity #{idx}: {opp.name}")
+            print(f"Detected candidate #{idx}: {opp.name}")
             print(f"  Event IDs: {', '.join(opp.event_ids)}")
             print(f"  Markets: {', '.join(opp.market_ids)}")
-            print(f"  Total Cost: {opp.total_cost:.4f}")
-            print(f"  Profit %: {opp.profit_percentage:.2f}%")
-            print(f"  Adjusted Profit %: {opp.adjusted_profit_percentage:.2f}%")
+            print(f"  Quoted ASK Cost: {opp.total_cost:.4f}")
+            print(f"  Model-implied edge: {opp.profit_percentage:.2f}%")
+            print(f"  Spread-adjusted model edge: {opp.adjusted_profit_percentage:.2f}%")
+
+    print("Detected candidates are not approved, submitted, filled, settled, or reported trades.")
 
     await clob_client.close()
 
@@ -111,7 +146,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=200, help="Number of events to fetch")
     parser.add_argument(
-        "--min-profit", type=float, default=0.5, help="Minimum profit percentage threshold"
+        "--min-profit", type=float, default=0.5, help="Minimum model-edge percentage"
     )
     parser.add_argument(
         "--max-total-price",
@@ -123,8 +158,8 @@ def main():
         "--price-type",
         type=str,
         default="ASK",
-        choices=[pt.name for pt in PriceType],
-        help="Price type to use for pricing legs",
+        choices=[PriceType.ASK.name],
+        help="Buy-side pricing orientation; only ASK is supported",
     )
 
     args = parser.parse_args()
