@@ -178,7 +178,14 @@ class NegRiskScanner(BaseScanner):
             return None
         
         # Check for arbitrage (sum of YES prices < 1)
-        if total_cost >= self.max_total_price_threshold:
+        try:
+            total_price_threshold = self._finite_float(
+                self.max_total_price_threshold,
+                "max_total_price_threshold",
+            )
+        except ValueError:
+            return None
+        if total_cost >= total_price_threshold:
             return None
         
         # Calculate model-implied edge using backward-compatible field names.

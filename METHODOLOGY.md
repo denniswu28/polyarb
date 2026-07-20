@@ -46,6 +46,12 @@ The `LIVE` reference-price accessor uses the unauthenticated public
 endpoint; last trade remains reference data and is rejected as a buy-side
 executable quote.
 
+All scanner arithmetic, risk limits, opportunity prices/costs/payoffs/sizes,
+liquidity values, fill ratios, and slippage inputs must be finite. NaN and
+positive or negative infinity are rejected before comparisons, derived-cost
+calculations, or approval fingerprinting. This is input validation, not evidence
+that a finite quote is current or executable.
+
 ## Liquidity and partial fills
 
 Displayed ask depth constrains modeled size but is not a fill guarantee. Simulated
@@ -58,6 +64,12 @@ size plus all leg, price, cost, market, strategy, risk, liquidity, and expiry
 inputs. Any post-approval change invalidates execution. Directly changing an
 opportunity's lifecycle flag does not authorize simulation, and releasing a
 reservation revokes the approval.
+
+If `expires_at` is supplied, it must be a timezone-aware `datetime`; the risk
+manager normalizes it to UTC. Already-expired opportunities cannot be approved.
+Reservations are revoked and removed from aggregate exposure when their UTC
+expiration passes, and execution rechecks the active reservation immediately
+before simulation.
 
 ## Cross-venue comparison
 

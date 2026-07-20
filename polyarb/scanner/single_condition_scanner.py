@@ -110,9 +110,20 @@ class SingleConditionScanner(BaseScanner):
         )
         if yes_price is None or no_price is None:
             return None
+        try:
+            yes_price = self._finite_float(yes_price, "YES ask price")
+            no_price = self._finite_float(no_price, "NO ask price")
+            total_price_threshold = self._finite_float(
+                self.max_total_price_threshold,
+                "max_total_price_threshold",
+            )
+        except ValueError:
+            return None
+        if not 0 < yes_price <= 1 or not 0 < no_price <= 1:
+            return None
 
         total_cost = yes_price + no_price
-        if total_cost >= self.max_total_price_threshold:
+        if total_cost >= total_price_threshold:
             return None
         
         # Calculate model-implied edge using backward-compatible field names.

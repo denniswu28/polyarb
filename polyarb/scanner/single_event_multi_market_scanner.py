@@ -182,7 +182,14 @@ class SingleEventMultiMarketScanner(BaseScanner):
         if len(legs) < 2 or len(legs) != len(markets):
             return None
 
-        if total_cost >= self.max_total_price_threshold:
+        try:
+            total_price_threshold = self._finite_float(
+                self.max_total_price_threshold,
+                "max_total_price_threshold",
+            )
+        except ValueError:
+            return None
+        if total_cost >= total_price_threshold:
             return None
 
         metrics = self.calculate_profit_metrics(

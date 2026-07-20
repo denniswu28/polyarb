@@ -14,6 +14,13 @@ from polyarb.scanner.single_event_multi_market_scanner import (
 )
 
 
+NONFINITE_VALUES = [
+    pytest.param(float("nan"), id="nan"),
+    pytest.param(float("inf"), id="positive-infinity"),
+    pytest.param(float("-inf"), id="negative-infinity"),
+]
+
+
 class UnsortedCLOB:
     async def fetch_orderbook(self, token_id, side=None):
         del token_id, side
@@ -87,6 +94,46 @@ def test_profit_metrics_enforce_cost_and_payoff_invariants():
         scanner.calculate_profit_metrics(0.9, 1.0, 1.0, fee_rate_bps=-1)
 
 
+@pytest.mark.parametrize("value", NONFINITE_VALUES)
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "min_profit_threshold",
+        "max_total_price_threshold",
+        "fee_rate_bps",
+        "slippage_bps",
+    ],
+)
+def test_scanner_rejects_nonfinite_configuration_limits(field_name, value):
+    with pytest.raises(ValueError, match="finite"):
+        BaseScanner(price_accessor=None, **{field_name: value})
+
+
+@pytest.mark.parametrize("value", NONFINITE_VALUES)
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "total_cost",
+        "worst_case_payoff",
+        "best_case_payoff",
+        "fee_rate_bps",
+        "slippage_bps",
+    ],
+)
+def test_profit_metrics_reject_nonfinite_inputs(field_name, value):
+    inputs = {
+        "total_cost": 0.9,
+        "worst_case_payoff": 1.0,
+        "best_case_payoff": 1.0,
+        "fee_rate_bps": 0.0,
+        "slippage_bps": 0.0,
+    }
+    inputs[field_name] = value
+
+    with pytest.raises(ValueError, match="finite"):
+        BaseScanner(price_accessor=None).calculate_profit_metrics(**inputs)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "price_type",
@@ -128,6 +175,25 @@ async def test_yes_no_outcome_orientation_and_ask_liquidity():
     ]
     assert all(leg.price_type == PriceType.ASK.value for leg in opportunity.legs)
     assert opportunity.max_size == pytest.approx(25.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", NONFINITE_VALUES)
+async def test_single_condition_scanner_rejects_nonfinite_ask(value):
+    accessor = StaticPriceAccessor({"yes-token": value, "no-token": 0.50})
+    scanner = SingleConditionScanner(price_accessor=accessor)
+    market = {
+        "id": "binary",
+        "question": "Synthetic outcome?",
+        "outcomes": [
+            {"label": "Yes", "yes_token_id": "yes-token"},
+            {"label": "No", "no_token_id": "no-token"},
+        ],
+    }
+
+    result = await scanner.scan([market])
+
+    assert result.get_opportunity_count() == 0
 
 
 def make_coverage_group():

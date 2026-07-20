@@ -5,6 +5,7 @@ Base scanner class with common functionality.
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from datetime import datetime
+import math
 
 from polyarb.scanner.enhanced_opportunity import EnhancedOpportunity, OpportunityClass
 from polyarb.data.models import PriceType
@@ -63,6 +64,16 @@ class BaseScanner:
             fee_rate_bps: Explicit per-basket fee assumption in basis points
             slippage_bps: Explicit per-basket slippage assumption in basis points
         """
+        min_profit_threshold = self._finite_float(
+            min_profit_threshold,
+            "min_profit_threshold",
+        )
+        max_total_price_threshold = self._finite_float(
+            max_total_price_threshold,
+            "max_total_price_threshold",
+        )
+        fee_rate_bps = self._finite_float(fee_rate_bps, "fee_rate_bps")
+        slippage_bps = self._finite_float(slippage_bps, "slippage_bps")
         if fee_rate_bps < 0 or slippage_bps < 0:
             raise ValueError("fee_rate_bps and slippage_bps must be non-negative")
         self.price_accessor = price_accessor
@@ -71,6 +82,17 @@ class BaseScanner:
         self.price_type = price_type
         self.fee_rate_bps = fee_rate_bps
         self.slippage_bps = slippage_bps
+
+    @staticmethod
+    def _finite_float(value: Any, name: str) -> float:
+        """Normalize scanner numeric inputs while rejecting NaN and infinities."""
+        try:
+            normalized = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be finite") from exc
+        if not math.isfinite(normalized):
+            raise ValueError(f"{name} must be finite")
+        return normalized
 
     @staticmethod
     def require_buy_price_type(price_type: PriceType) -> None:
@@ -119,17 +141,46 @@ class BaseScanner:
         Returns:
             Dictionary using backward-compatible profit field names for model edge
         """
-        if total_cost < 0 or worst_case_payoff < 0 or best_case_payoff < worst_case_payoff:
+        total_cost = self._finite_float(total_cost, "total_cost")
+        worst_case_payoff = self._finite_float(
+            worst_case_payoff,
+            "worst_case_payoff",
+        )
+        best_case_payoff = self._finite_float(best_case_payoff, "best_case_payoff")
+        fee_rate_bps = self._finite_float(fee_rate_bps, "fee_rate_bps")
+        slippage_bps = self._finite_float(slippage_bps, "slippage_bps")
+        if (
+            total_cost < 0
+            or worst_case_payoff < 0
+            or best_case_payoff < worst_case_payoff
+        ):
             raise ValueError("Cost and payoff inputs violate scanner invariants")
         if fee_rate_bps < 0 or slippage_bps < 0:
             raise ValueError("Fee and slippage inputs must be non-negative")
 
-        fee_cost = total_cost * fee_rate_bps / 10000
-        slippage_cost = total_cost * slippage_bps / 10000
-        effective_cost = total_cost + fee_cost + slippage_cost
-        expected_profit = worst_case_payoff - effective_cost
+        fee_cost = self._finite_float(
+            total_cost * fee_rate_bps / 10000,
+            "fee_cost",
+        )
+        slippage_cost = self._finite_float(
+            total_cost * slippage_bps / 10000,
+            "slippage_cost",
+        )
+        effective_cost = self._finite_float(
+            total_cost + fee_cost + slippage_cost,
+            "effective_cost",
+        )
+        expected_profit = self._finite_float(
+            worst_case_payoff - effective_cost,
+            "expected_profit",
+        )
         profit_percentage = (
-            expected_profit / effective_cost * 100 if effective_cost > 0 else 0
+            self._finite_float(
+                expected_profit / effective_cost * 100,
+                "profit_percentage",
+            )
+            if effective_cost > 0
+            else 0
         )
         
         return {
@@ -160,15 +211,28 @@ class BaseScanner:
         Returns:
             Adjusted cost
         """
+        total_cost = self._finite_float(total_cost, "total_cost")
+        spread_multiplier = self._finite_float(
+            spread_multiplier,
+            "spread_multiplier",
+        )
         spread_adjustment = 0.0
         
         for leg in legs:
-            if hasattr(leg, 'spread_bps') and leg.spread_bps:
+            leg_price = self._finite_float(leg.price, "leg price")
+            if hasattr(leg, "spread_bps") and leg.spread_bps is not None:
+                spread_bps = self._finite_float(leg.spread_bps, "leg spread_bps")
                 # Spread impact as percentage
-                spread_impact = leg.spread_bps / 10000 * leg.price
-                spread_adjustment += spread_impact * spread_multiplier
+                spread_impact = self._finite_float(
+                    spread_bps / 10000 * leg_price,
+                    "spread impact",
+                )
+                spread_adjustment = self._finite_float(
+                    spread_adjustment + spread_impact * spread_multiplier,
+                    "spread adjustment",
+                )
         
-        return total_cost + spread_adjustment
+        return self._finite_float(total_cost + spread_adjustment, "adjusted cost")
     
     def estimate_liquidity_score(self, legs: List[Any]) -> float:
         """
@@ -186,7 +250,7 @@ class BaseScanner:
         depths = []
         for leg in legs:
             if hasattr(leg, "depth") and leg.depth is not None:
-                depths.append(leg.depth)
+                depths.append(self._finite_float(leg.depth, "leg depth"))
         
         if not depths:
             return 0.5  # Unknown, assume medium
@@ -221,8 +285,21 @@ class BaseScanner:
         Returns:
             True if valid
         """
+        try:
+            profit_percentage = self._finite_float(
+                profit_percentage,
+                "profit_percentage",
+            )
+            total_cost = self._finite_float(total_cost, "total_cost")
+            threshold = self._finite_float(
+                self.min_profit_threshold,
+                "min_profit_threshold",
+            )
+        except ValueError:
+            return False
+
         # Must meet the backward-compatible model-edge threshold.
-        if profit_percentage < self.min_profit_threshold:
+        if profit_percentage < threshold:
             return False
         
         # Cost must be positive and reasonable
@@ -234,5 +311,9 @@ class BaseScanner:
     @staticmethod
     def get_max_size(legs: List[Any]) -> Optional[float]:
         """Return the limiting displayed ask depth, including an explicit zero."""
-        depths = [leg.depth for leg in legs if getattr(leg, "depth", None) is not None]
+        depths = [
+            BaseScanner._finite_float(leg.depth, "leg depth")
+            for leg in legs
+            if getattr(leg, "depth", None) is not None
+        ]
         return min(depths) if depths else None

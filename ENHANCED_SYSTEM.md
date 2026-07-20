@@ -10,7 +10,7 @@ test suite define the supported reproducibility path.
 | Strategy templates | `all_no`, balanced, and custom data structures | Logical coverage and rule equivalence require independent review |
 | Embeddings and dependencies | Optional embedding, clustering, vector-store, and heuristic/LLM interfaces | Experimental; no validated LLM pipeline or default offline evidence |
 | Scanners | Single-condition, NegRisk, event-coverage, and template scanners | Coverage groups fail closed if any required outcome, token, or ASK is missing; candidate arithmetic is not approval or execution |
-| Risk and execution | Configurable aggregate approval reservations and deterministic paper fills | Simulations require an unchanged immutable approval fingerprint and exact size; live submission is disabled |
+| Risk and execution | Configurable aggregate approval reservations and deterministic paper fills | Simulations require an unchanged, unexpired immutable approval fingerprint and exact size; non-finite values fail closed; live submission is disabled |
 | Reporting | Opportunity and research-metric exports | Simulations cannot contribute to submitted/filled/settled or realized-result fields; hand-built live records are rejected |
 | Backtester | Compatibility class and result schema | `run_backtest` and price comparison fail closed; historical replay is not implemented |
 
@@ -40,7 +40,9 @@ executor = BasketExecutor(
 
 # A lifecycle flag alone is insufficient: the same RiskManager must retain the
 # active reservation, and every fingerprinted field and the exact size must
-# remain unchanged when the simulation starts.
+# remain unchanged when the simulation starts. If expires_at is set, it must be
+# timezone-aware; expiration is normalized to UTC and releases the reservation.
+# NaN and infinities are rejected for numeric risk and simulation inputs.
 # The result remains lifecycle_state="simulated" even when its hypothetical
 # fill_status is "filled". No order ID is created.
 result = await executor.execute_opportunity(

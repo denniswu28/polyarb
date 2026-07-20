@@ -15,7 +15,7 @@ performance or profit claim is made.
 | Core synthetic market scanning | Implemented and tested | Offline intra-venue baskets use explicit synthetic asks; cross-venue comparisons use asks for buys and bids for sells |
 | Polymarket parsing and public-data scanning | Implemented; owner-validated | Gamma display prices are labeled reference-only; the opt-in CLOB scanner obtains order-book quotes and is excluded from CI |
 | Price orientation | Implemented and tested | Core and enhanced long-only scanners require executable ASK costs; BID/MID/LIVE/ACTUAL/reference inputs fail closed for buys |
-| Fees, slippage, liquidity, and risk inputs | Implemented and tested | Simulations require an active manager-issued reservation whose immutable approval fingerprint and exact size still match |
+| Fees, slippage, liquidity, and risk inputs | Implemented and tested | NaN/infinities fail closed; simulations require an unexpired manager-issued reservation whose immutable approval fingerprint and exact size still match |
 | Basket execution | Simulated only | Deterministic paper fills; no order IDs, credentials, wallet, funded account, or submission |
 | Research reporting | Implemented with boundaries | Simulations are excluded from submitted, filled, settled, and realized-result counts; unvalidated live/fill/settlement objects are rejected |
 | SQL storage and optional embedding modules | Experimental | Module surfaces exist; not exercised by the default example or full end-to-end CI |
@@ -122,6 +122,12 @@ scanner. Neither network example is part of CI or the default reproduction claim
   they do not calculate a cheaper basket from a subset.
 - Fees and slippage are explicit inputs. Displayed depth is a liquidity
   constraint, not a fill forecast.
+- Scanner, risk, and simulation numeric inputs and derived values must be finite;
+  NaN and positive/negative infinity are rejected before limit comparisons or
+  approval fingerprinting.
+- An opportunity `expires_at` value must be timezone-aware. Risk checks normalize
+  it to UTC, reject already-expired opportunities, and release approval exposure
+  when expiration passes; an expired approval cannot authorize simulation.
 - Cross-venue output is a quote-discrepancy research candidate. Contract
   equivalence, short/sell availability, transfer constraints, platform rules,
   and atomic execution are not established.

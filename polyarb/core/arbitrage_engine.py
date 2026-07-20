@@ -1,5 +1,6 @@
 """Research engine for model-implied prediction-market candidates."""
 
+import math
 from typing import List, Dict, Optional, Set
 
 from polyarb.platforms.base import PlatformInterface, Market
@@ -29,17 +30,55 @@ class ArbitrageEngine:
             fee_rate_bps: Explicit fee assumption applied to modeled transaction value
             slippage_bps: Explicit slippage assumption applied to modeled transaction value
         """
-        if fee_rate_bps < 0 or slippage_bps < 0:
-            raise ValueError("fee_rate_bps and slippage_bps must be non-negative")
         self.platforms = platforms or []
-        self.min_profit_threshold = min_profit_threshold
-        self.max_total_price_threshold = max_total_price_threshold
-        self.fee_rate_bps = fee_rate_bps
-        self.slippage_bps = slippage_bps
+        self.min_profit_threshold = self._finite_float(
+            min_profit_threshold,
+            "min_profit_threshold",
+        )
+        self.max_total_price_threshold = self._finite_float(
+            max_total_price_threshold,
+            "max_total_price_threshold",
+        )
+        self.fee_rate_bps = self._finite_float(fee_rate_bps, "fee_rate_bps")
+        self.slippage_bps = self._finite_float(slippage_bps, "slippage_bps")
+        self._validate_config()
+
+    @staticmethod
+    def _finite_float(value: object, name: str) -> float:
+        try:
+            normalized = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be finite") from exc
+        if not math.isfinite(normalized):
+            raise ValueError(f"{name} must be finite")
+        return normalized
+
+    def _validate_config(self) -> None:
+        """Reject non-finite limits, including configuration mutated after init."""
+        self.min_profit_threshold = self._finite_float(
+            self.min_profit_threshold,
+            "min_profit_threshold",
+        )
+        self.max_total_price_threshold = self._finite_float(
+            self.max_total_price_threshold,
+            "max_total_price_threshold",
+        )
+        self.fee_rate_bps = self._finite_float(self.fee_rate_bps, "fee_rate_bps")
+        self.slippage_bps = self._finite_float(self.slippage_bps, "slippage_bps")
+        if self.fee_rate_bps < 0 or self.slippage_bps < 0:
+            raise ValueError("fee_rate_bps and slippage_bps must be non-negative")
 
     def _cost_adjustment(self, transaction_value: float) -> float:
         """Return configured fees and slippage for a modeled transaction value."""
-        return transaction_value * (self.fee_rate_bps + self.slippage_bps) / 10000
+        self._validate_config()
+        transaction_value = self._finite_float(
+            transaction_value,
+            "transaction_value",
+        )
+        return self._finite_float(
+            transaction_value * (self.fee_rate_bps + self.slippage_bps) / 10000,
+            "cost adjustment",
+        )
     
     def add_platform(self, platform: PlatformInterface) -> None:
         """Add a platform to monitor."""
@@ -58,6 +97,7 @@ class ArbitrageEngine:
         Returns:
             List of ArbitrageOpportunity objects
         """
+        self._validate_config()
         opportunities = []
         
         # Find intra-platform opportunities for each platform
@@ -107,20 +147,32 @@ class ArbitrageEngine:
             if len(ask_prices) < 2 or any(price is None for price in ask_prices.values()):
                 continue
 
+            try:
+                ask_prices = {
+                    outcome: self._finite_float(price, f"{outcome} ask price")
+                    for outcome, price in ask_prices.items()
+                }
+            except ValueError:
+                continue
+
             # Calculate total price from executable asks only.
-            total_price = sum(price for price in ask_prices.values() if price is not None)
+            total_price = self._finite_float(sum(ask_prices.values()), "total price")
 
             # Skip malformed markets to avoid division errors
             if total_price <= 0:
                 continue
 
-            effective_total_price = total_price + self._cost_adjustment(total_price)
+            effective_total_price = self._finite_float(
+                total_price + self._cost_adjustment(total_price),
+                "effective total price",
+            )
 
             # The model reports a candidate only after explicit cost assumptions.
             if effective_total_price < self.max_total_price_threshold:
-                profit_percentage = (
-                    (1 - effective_total_price) / effective_total_price
-                ) * 100
+                profit_percentage = self._finite_float(
+                    (1 - effective_total_price) / effective_total_price * 100,
+                    "model edge percentage",
+                )
 
                 # Calculate optimal positions
                 strategy = {
@@ -265,11 +317,19 @@ class ArbitrageEngine:
                 ask = buy_market.get_executable_price(outcome, "buy")
                 if ask is None:
                     continue
+                try:
+                    ask = self._finite_float(ask, f"{outcome} ask price")
+                except ValueError:
+                    continue
                 for sell_market in markets:
                     if sell_market is buy_market or sell_market.platform == buy_market.platform:
                         continue
                     bid = sell_market.get_executable_price(outcome, "sell")
                     if bid is not None:
+                        try:
+                            bid = self._finite_float(bid, f"{outcome} bid price")
+                        except ValueError:
+                            continue
                         executable_pairs.append((buy_market, ask, sell_market, bid))
 
             if executable_pairs:
@@ -291,14 +351,23 @@ class ArbitrageEngine:
                 ) = executable_pairs[0]
                 
                 # Calculate the modeled quote discrepancy after explicit costs.
-                price_diff = highest_price - lowest_price
+                price_diff = self._finite_float(
+                    highest_price - lowest_price,
+                    "price difference",
+                )
                 if lowest_price <= 0:
                     continue
 
                 modeled_costs = self._cost_adjustment(lowest_price + highest_price)
-                modeled_edge = price_diff - modeled_costs
+                modeled_edge = self._finite_float(
+                    price_diff - modeled_costs,
+                    "modeled edge",
+                )
                 if modeled_edge > 0.01:  # Minimum modeled 1 cent discrepancy
-                    profit_percentage = (modeled_edge / lowest_price) * 100
+                    profit_percentage = self._finite_float(
+                        modeled_edge / lowest_price * 100,
+                        "model edge percentage",
+                    )
                     
                     strategy = {
                         "action": "buy_low_sell_high",

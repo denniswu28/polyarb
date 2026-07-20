@@ -2,6 +2,8 @@
 Tests for the arbitrage engine core functionality.
 """
 
+import pytest
+
 from polyarb.core.arbitrage_engine import ArbitrageEngine
 from polyarb.core.opportunity import ArbitrageOpportunity, OpportunityType
 from polyarb.platforms.base import PlatformInterface, Market
@@ -46,6 +48,28 @@ def test_arbitrage_engine_initialization():
     assert engine is not None
     assert len(engine.platforms) == 0
     assert engine.min_profit_threshold == 1.0
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(float("nan"), id="nan"),
+        pytest.param(float("inf"), id="positive-infinity"),
+        pytest.param(float("-inf"), id="negative-infinity"),
+    ],
+)
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "min_profit_threshold",
+        "max_total_price_threshold",
+        "fee_rate_bps",
+        "slippage_bps",
+    ],
+)
+def test_arbitrage_engine_rejects_nonfinite_limits(field_name, value):
+    with pytest.raises(ValueError, match="finite"):
+        ArbitrageEngine(**{field_name: value})
 
 
 def test_add_platform():

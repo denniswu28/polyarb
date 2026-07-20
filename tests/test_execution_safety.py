@@ -1,5 +1,7 @@
 """Offline tests for risk approval, simulations, partial fills, and reporting boundaries."""
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from polyarb.core.lifecycle import LifecycleState
@@ -324,3 +326,214 @@ async def test_mutating_stored_simulation_to_live_evidence_fails_closed():
 
     with pytest.raises(UnvalidatedLiveExecutionError, match="no provenance-bearing"):
         tracker.calculate_metrics()
+
+
+NONFINITE_VALUES = [
+    pytest.param(float("nan"), id="nan"),
+    pytest.param(float("inf"), id="positive-infinity"),
+    pytest.param(float("-inf"), id="negative-infinity"),
+]
+
+
+@pytest.mark.parametrize("value", NONFINITE_VALUES)
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "max_total_notional",
+        "max_per_strategy_notional",
+        "max_per_market_notional",
+        "max_per_topic_notional",
+        "max_positions",
+        "max_positions_per_market",
+        "min_profit_threshold",
+        "max_rule_risk_exposure",
+        "max_slippage_tolerance",
+        "min_liquidity_score",
+    ],
+)
+def test_risk_limits_reject_every_nonfinite_numeric_limit(field_name, value):
+    with pytest.raises(ValueError, match="finite"):
+        RiskLimits(**{field_name: value})
+
+
+@pytest.mark.parametrize("value", NONFINITE_VALUES)
+def test_risk_approval_rejects_nonfinite_size_without_reserving(value):
+    opportunity = make_opportunity()
+    manager = RiskManager()
+
+    passed, violations = manager.approve_opportunity(opportunity, value)
+
+    assert passed is False
+    assert any("finite" in violation for violation in violations)
+    assert manager.approvals == {}
+    assert manager.get_exposure_summary()["total_notional"] == 0.0
+    assert opportunity.lifecycle_state == LifecycleState.DETECTED
+
+
+@pytest.mark.parametrize("value", NONFINITE_VALUES)
+@pytest.mark.parametrize(
+    ("target", "field_name"),
+    [
+        ("opportunity", "total_cost"),
+        ("opportunity", "worst_case_payoff"),
+        ("opportunity", "best_case_payoff"),
+        ("opportunity", "expected_profit"),
+        ("opportunity", "profit_percentage"),
+        ("opportunity", "adjusted_cost"),
+        ("opportunity", "adjusted_profit"),
+        ("opportunity", "adjusted_profit_percentage"),
+        ("opportunity", "max_size"),
+        ("opportunity", "liquidity_score"),
+        ("leg", "price"),
+        ("leg", "size"),
+        ("leg", "spread_bps"),
+        ("leg", "depth"),
+    ],
+)
+def test_risk_approval_rejects_nonfinite_opportunity_inputs(target, field_name, value):
+    opportunity = make_opportunity()
+    subject = opportunity if target == "opportunity" else opportunity.legs[0]
+    setattr(subject, field_name, value)
+    manager = RiskManager()
+
+    passed, violations = manager.approve_opportunity(opportunity, 1.0)
+
+    assert passed is False
+    assert any("finite" in violation for violation in violations)
+    assert manager.approvals == {}
+    assert manager.get_exposure_summary()["total_notional"] == 0.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", NONFINITE_VALUES)
+async def test_nonfinite_target_size_is_rejected_before_simulation(value):
+    opportunity = make_opportunity()
+    manager = approve_for_simulation(opportunity)
+
+    with pytest.raises(ValueError, match="target_size must be finite"):
+        await BasketExecutor(risk_manager=manager).execute_opportunity(
+            opportunity,
+            target_size=value,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", NONFINITE_VALUES)
+@pytest.mark.parametrize(
+    "input_name",
+    ["simulation_fill_ratios", "simulation_slippage_bps"],
+)
+async def test_nonfinite_simulation_inputs_are_rejected(input_name, value):
+    opportunity = make_opportunity()
+    manager = approve_for_simulation(opportunity)
+    kwargs = {input_name: [value, 0.0]}
+
+    with pytest.raises(ValueError, match="must be finite"):
+        await BasketExecutor(risk_manager=manager).execute_opportunity(
+            opportunity,
+            **kwargs,
+        )
+
+
+@pytest.mark.parametrize("value", NONFINITE_VALUES)
+@pytest.mark.parametrize(
+    "field_name",
+    ["max_slippage_bps", "min_fill_rate", "execution_timeout"],
+)
+def test_executor_rejects_nonfinite_limits(field_name, value):
+    with pytest.raises(ValueError, match="finite"):
+        BasketExecutor(**{field_name: value})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", NONFINITE_VALUES)
+async def test_mutated_nonfinite_executor_limit_is_rejected(value):
+    opportunity = make_opportunity()
+    manager = approve_for_simulation(opportunity)
+    executor = BasketExecutor(risk_manager=manager)
+    executor.max_slippage_bps = value
+
+    with pytest.raises(ValueError, match="max_slippage_bps must be finite"):
+        await executor.execute_opportunity(opportunity)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", NONFINITE_VALUES)
+async def test_post_approval_nonfinite_mutation_invalidates_execution(value):
+    opportunity = make_opportunity()
+    manager = approve_for_simulation(opportunity)
+    opportunity.legs[0].price = value
+
+    assert manager.has_active_approval(opportunity, 1.0) is False
+    with pytest.raises(OpportunityNotApprovedError, match="RiskManager-issued"):
+        await BasketExecutor(risk_manager=manager).execute_opportunity(opportunity)
+
+
+def test_already_expired_opportunity_cannot_be_approved(monkeypatch):
+    now = datetime(2026, 7, 19, 12, 0, tzinfo=timezone.utc)
+    opportunity = make_opportunity()
+    opportunity.expires_at = now - timedelta(microseconds=1)
+    manager = RiskManager()
+    monkeypatch.setattr(manager, "_utc_now", lambda: now)
+
+    passed, violations = manager.approve_opportunity(opportunity, 1.0)
+
+    assert passed is False
+    assert violations == ["Opportunity has expired"]
+    assert manager.approvals == {}
+    assert manager.get_exposure_summary()["total_notional"] == 0.0
+
+
+def test_naive_expiration_timestamp_fails_closed(monkeypatch):
+    now = datetime(2026, 7, 19, 12, 0, tzinfo=timezone.utc)
+    opportunity = make_opportunity()
+    opportunity.expires_at = datetime(2026, 7, 20, 12, 0)
+    manager = RiskManager()
+    monkeypatch.setattr(manager, "_utc_now", lambda: now)
+
+    passed, violations = manager.approve_opportunity(opportunity, 1.0)
+
+    assert passed is False
+    assert violations == ["expires_at must be a timezone-aware datetime"]
+    assert manager.approvals == {}
+
+
+@pytest.mark.asyncio
+async def test_approval_that_expires_before_execution_is_revoked(monkeypatch):
+    clock = {"now": datetime(2026, 7, 19, 12, 0, tzinfo=timezone.utc)}
+    opportunity = make_opportunity()
+    opportunity.expires_at = clock["now"] + timedelta(minutes=1)
+    manager = RiskManager()
+    monkeypatch.setattr(manager, "_utc_now", lambda: clock["now"])
+    assert manager.approve_opportunity(opportunity, 1.0) == (True, [])
+    assert manager.get_exposure_summary()["approved_notional"] == pytest.approx(0.9)
+
+    clock["now"] += timedelta(minutes=2)
+
+    with pytest.raises(OpportunityNotApprovedError, match="RiskManager-issued"):
+        await BasketExecutor(risk_manager=manager).execute_opportunity(opportunity)
+    assert opportunity.lifecycle_state == LifecycleState.DETECTED
+    assert manager.approvals == {}
+    assert manager.get_exposure_summary()["approved_notional"] == 0.0
+    assert manager.get_exposure_summary()["total_notional"] == 0.0
+
+
+def test_expired_reservation_no_longer_consumes_aggregate_limit(monkeypatch):
+    clock = {"now": datetime(2026, 7, 19, 12, 0, tzinfo=timezone.utc)}
+    first = make_opportunity(opportunity_id="expires-first")
+    first.expires_at = (clock["now"] + timedelta(minutes=1)).astimezone(
+        timezone(timedelta(hours=-7))
+    )
+    second = make_opportunity(opportunity_id="second")
+    manager = RiskManager(RiskLimits(max_total_notional=0.9))
+    monkeypatch.setattr(manager, "_utc_now", lambda: clock["now"])
+    assert manager.approve_opportunity(first, 1.0) == (True, [])
+
+    clock["now"] += timedelta(minutes=2)
+
+    assert manager.approve_opportunity(second, 1.0) == (True, [])
+    summary = manager.get_exposure_summary()
+    assert first.lifecycle_state == LifecycleState.DETECTED
+    assert second.lifecycle_state == LifecycleState.APPROVED
+    assert summary["approved_notional"] == pytest.approx(0.9)
+    assert summary["approved_positions"] == 2

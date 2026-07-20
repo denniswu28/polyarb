@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+import math
 from typing import TYPE_CHECKING, List, Optional, Sequence
 
 from polyarb.core.lifecycle import LifecycleState
@@ -10,6 +11,17 @@ from polyarb.scanner.enhanced_opportunity import EnhancedOpportunity, Leg
 
 if TYPE_CHECKING:
     from polyarb.execution.risk_manager import RiskManager
+
+
+def _finite_float(value: object, name: str) -> float:
+    """Normalize a numeric simulation input and reject NaN and infinities."""
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite") from exc
+    if not math.isfinite(normalized):
+        raise ValueError(f"{name} must be finite")
+    return normalized
 
 
 class ExecutionMode(str, Enum):
@@ -87,10 +99,23 @@ class ExecutionResult:
 
     def get_fill_rate(self) -> float:
         """Return filled size divided by requested size across all simulated legs."""
-        requested = sum(leg.requested_size for leg in self.leg_executions)
+        requested = _finite_float(
+            sum(
+                _finite_float(leg.requested_size, "leg requested_size")
+                for leg in self.leg_executions
+            ),
+            "aggregate requested size",
+        )
         if requested <= 0:
             return 0.0
-        return sum(leg.filled_size for leg in self.leg_executions) / requested
+        filled = _finite_float(
+            sum(
+                _finite_float(leg.filled_size, "leg filled_size")
+                for leg in self.leg_executions
+            ),
+            "aggregate filled size",
+        )
+        return _finite_float(filled / requested, "fill rate")
 
     def is_simulated(self) -> bool:
         """Return whether this record describes a simulation."""
@@ -138,10 +163,15 @@ class BasketExecutor:
         execution_mode: ExecutionMode = ExecutionMode.SIMULATED,
         risk_manager: Optional["RiskManager"] = None,
     ):
+        max_slippage_bps = _finite_float(max_slippage_bps, "max_slippage_bps")
+        min_fill_rate = _finite_float(min_fill_rate, "min_fill_rate")
+        execution_timeout = _finite_float(execution_timeout, "execution_timeout")
         if max_slippage_bps < 0:
             raise ValueError("max_slippage_bps must be non-negative")
         if not 0 <= min_fill_rate <= 1:
             raise ValueError("min_fill_rate must be between 0 and 1")
+        if execution_timeout <= 0:
+            raise ValueError("execution_timeout must be positive")
 
         self.max_slippage_bps = max_slippage_bps
         self.min_fill_rate = min_fill_rate
@@ -162,6 +192,22 @@ class BasketExecutor:
             raise LiveExecutionDisabledError(
                 "Live order submission is disabled and not implemented in polyarb."
             )
+        target_size = _finite_float(target_size, "target_size")
+        self.max_slippage_bps = _finite_float(
+            self.max_slippage_bps,
+            "max_slippage_bps",
+        )
+        self.min_fill_rate = _finite_float(self.min_fill_rate, "min_fill_rate")
+        self.execution_timeout = _finite_float(
+            self.execution_timeout,
+            "execution_timeout",
+        )
+        if self.max_slippage_bps < 0:
+            raise ValueError("max_slippage_bps must be non-negative")
+        if not 0 <= self.min_fill_rate <= 1:
+            raise ValueError("min_fill_rate must be between 0 and 1")
+        if self.execution_timeout <= 0:
+            raise ValueError("execution_timeout must be positive")
         if self.risk_manager is None or not self.risk_manager.has_active_approval(
             opportunity,
             target_size,
@@ -193,10 +239,15 @@ class BasketExecutor:
             name="simulation_slippage_bps",
         )
 
+        modeled_total_cost = _finite_float(
+            _finite_float(opportunity.total_cost, "opportunity total_cost")
+            * target_size,
+            "modeled total cost",
+        )
         result = ExecutionResult(
             opportunity_id=opportunity.id,
             status=ExecutionStatus.SIMULATED,
-            total_cost=opportunity.total_cost * target_size,
+            total_cost=modeled_total_cost,
             notes=["Paper simulation only; no order was created or submitted."],
         )
 
@@ -215,19 +266,29 @@ class BasketExecutor:
             )
 
         result.completed_at = datetime.utcnow()
-        result.simulated_cost = sum(
-            leg.avg_fill_price * leg.filled_size
-            for leg in result.leg_executions
-            if leg.avg_fill_price is not None
+        result.simulated_cost = _finite_float(
+            sum(
+                _finite_float(leg.avg_fill_price, "simulated fill price")
+                * _finite_float(leg.filled_size, "simulated filled size")
+                for leg in result.leg_executions
+                if leg.avg_fill_price is not None
+            ),
+            "simulated cost",
         )
-        expected_cost_of_filled_size = sum(
-            leg.leg.price * leg.filled_size for leg in result.leg_executions
+        expected_cost_of_filled_size = _finite_float(
+            sum(
+                _finite_float(leg.leg.price, "leg price")
+                * _finite_float(leg.filled_size, "simulated filled size")
+                for leg in result.leg_executions
+            ),
+            "expected cost of filled size",
         )
         if expected_cost_of_filled_size > 0:
-            result.simulated_slippage_bps = (
+            result.simulated_slippage_bps = _finite_float(
                 (result.simulated_cost - expected_cost_of_filled_size)
                 / expected_cost_of_filled_size
-                * 10000
+                * 10000,
+                "simulated slippage",
             )
 
         fill_rate = result.get_fill_rate()
@@ -262,13 +323,26 @@ class BasketExecutor:
     ) -> LegExecution:
         """Create one deterministic simulated leg result."""
         del aggressive, opportunity
-        applied_slippage = 5.0 if slippage_bps is None else slippage_bps
+        size = _finite_float(size, "simulated leg size")
+        fill_ratio = _finite_float(fill_ratio, "simulation fill ratio")
+        if not 0 <= fill_ratio <= 1:
+            raise ValueError("simulation fill ratio must be between 0 and 1")
+        applied_slippage = _finite_float(
+            5.0 if slippage_bps is None else slippage_bps,
+            "simulation slippage",
+        )
+        if applied_slippage < 0:
+            raise ValueError("simulation slippage must be non-negative")
+        leg_price = _finite_float(leg.price, "leg price")
         risk_slippage_limit = (
             self.risk_manager.limits.max_slippage_tolerance
             if self.risk_manager is not None
             else self.max_slippage_bps
         )
-        allowed_slippage = min(self.max_slippage_bps, risk_slippage_limit)
+        allowed_slippage = min(
+            _finite_float(self.max_slippage_bps, "max_slippage_bps"),
+            _finite_float(risk_slippage_limit, "risk slippage limit"),
+        )
         if fill_ratio == 0 or applied_slippage > allowed_slippage:
             reason = (
                 "simulated no-fill"
@@ -283,8 +357,11 @@ class BasketExecutor:
                 error_message=reason,
             )
 
-        filled_size = size * fill_ratio
-        actual_price = leg.price * (1 + applied_slippage / 10000)
+        filled_size = _finite_float(size * fill_ratio, "simulated filled size")
+        actual_price = _finite_float(
+            leg_price * (1 + applied_slippage / 10000),
+            "simulated fill price",
+        )
         status = (
             ExecutionStatus.FILLED
             if fill_ratio == 1.0
@@ -314,7 +391,7 @@ class BasketExecutor:
             return [default] * count
         if len(values) != count:
             raise ValueError(f"{name} must contain one value per opportunity leg")
-        normalized = [float(value) for value in values]
+        normalized = [_finite_float(value, f"{name} value") for value in values]
         if any(value < lower or (upper is not None and value > upper) for value in normalized):
             bound = f"[{lower}, {upper}]" if upper is not None else f">= {lower}"
             raise ValueError(f"{name} values must be within {bound}")
@@ -331,16 +408,35 @@ class BasketExecutor:
     ) -> float:
         """Recompute the model-implied remaining edge after simulated fills."""
         executed_token_ids = {
-            leg.leg.token_id for leg in executed_legs if leg.filled_size > 0
-        }
-        executed_cost = sum(
-            leg.avg_fill_price * leg.filled_size
+            leg.leg.token_id
             for leg in executed_legs
-            if leg.avg_fill_price is not None
+            if _finite_float(leg.filled_size, "executed filled size") > 0
+        }
+        executed_cost = _finite_float(
+            sum(
+                _finite_float(leg.avg_fill_price, "executed fill price")
+                * _finite_float(leg.filled_size, "executed filled size")
+                for leg in executed_legs
+                if leg.avg_fill_price is not None
+            ),
+            "executed cost",
         )
-        remaining_cost = sum(
-            leg.price for leg in opportunity.legs if leg.token_id not in executed_token_ids
+        remaining_cost = _finite_float(
+            sum(
+                _finite_float(leg.price, "remaining leg price")
+                for leg in opportunity.legs
+                if leg.token_id not in executed_token_ids
+            ),
+            "remaining cost",
         )
-        total_cost = executed_cost + remaining_cost
-        model_edge = opportunity.worst_case_payoff - total_cost
-        return (model_edge / total_cost * 100) if total_cost > 0 else 0.0
+        total_cost = _finite_float(executed_cost + remaining_cost, "total cost")
+        model_edge = _finite_float(
+            _finite_float(opportunity.worst_case_payoff, "worst_case_payoff")
+            - total_cost,
+            "model edge",
+        )
+        return (
+            _finite_float(model_edge / total_cost * 100, "model edge percentage")
+            if total_cost > 0
+            else 0.0
+        )

@@ -14,7 +14,9 @@ production-readiness claim. The authoritative status matrix is in
 - ASK/BID orientation checks for long-only basket costs.
 - Liquidity and configurable risk-limit checks with aggregate exposure and leg
   reservations that must remain active and exactly match their immutable
-  approval-time fingerprint through simulated execution.
+  approval-time fingerprint through simulated execution. Non-finite numeric
+  values fail closed, and timezone-aware expirations are enforced at approval,
+  exposure accounting, and simulation authorization.
 - Coverage scanners that reject an entire event/NegRisk group when any required
   outcome, token ID, or executable ASK quote is missing.
 - Deterministic paper-fill scenarios, including partial/no-fill inputs, without
